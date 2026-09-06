@@ -374,15 +374,49 @@ impl InlineReporter {
         }
         self.draw(true)?;
 
-        let text = format_summary(summary, true);
-        let style = summary_style(summary, self.color);
+        let item_lines: Vec<_> = self
+            .state
+            .items
+            .iter()
+            .map(|item| {
+                (
+                    format_item_report(item, self.width),
+                    status_style(item.status, self.color),
+                )
+            })
+            .collect();
+        let summary_text = format_summary(summary, true);
+        let summary_style = summary_style(summary, self.color);
         let width = usize::from(self.width.max(1));
-        let height = (text.chars().count().max(1).div_ceil(width)) as u16;
-        self.terminal.insert_before(height.max(1), |buffer| {
-            Paragraph::new(text)
-                .style(style)
+        let summary_height = summary_text.chars().count().max(1).div_ceil(width) as u16;
+        let item_count = u16::try_from(item_lines.len()).unwrap_or(u16::MAX);
+        let report_height = item_count.saturating_add(summary_height.max(1));
+
+        self.terminal.insert_before(report_height, |buffer| {
+            let area = buffer.area;
+            for (row, (text, style)) in item_lines.into_iter().enumerate() {
+                if row as u16 >= area.height.saturating_sub(summary_height) {
+                    break;
+                }
+                Paragraph::new(text).style(style).render(
+                    Rect::new(area.x, area.y.saturating_add(row as u16), area.width, 1),
+                    buffer,
+                );
+            }
+            Paragraph::new(summary_text)
+                .style(summary_style)
                 .wrap(Wrap { trim: false })
-                .render(buffer.area, buffer);
+                .render(
+                    Rect::new(
+                        area.x,
+                        area.y.saturating_add(
+                            item_count.min(area.height.saturating_sub(summary_height)),
+                        ),
+                        area.width,
+                        summary_height.min(area.height),
+                    ),
+                    buffer,
+                );
         })?;
 
         self.cleanup()?;
@@ -740,6 +774,29 @@ fn summary_style(summary: &Summary, color: bool) -> Style {
     status_style(status, color)
 }
 
+fn format_item_report(item: &ItemView, width: u16) -> String {
+    let symbol = status_symbol(item.status, 0);
+    let suffix = if width >= 55 {
+        format!(
+            "  {}/{} files  {}  {}",
+            item.copied_files,
+            item.total_files,
+            format_bytes(item.copied_bytes),
+            item.status.label()
+        )
+    } else {
+        format!(
+            "  {}/{}  {}",
+            item.copied_files,
+            item.total_files,
+            item.status.label()
+        )
+    };
+    let fixed_width = symbol.chars().count() + 1 + suffix.chars().count();
+    let name_width = usize::from(width).saturating_sub(fixed_width).max(1);
+    format!("{symbol} {}{suffix}", truncate(&item.name, name_width))
+}
+
 pub fn format_summary(summary: &Summary, unicode: bool) -> String {
     let symbol = if summary.cancelled {
         if unicode {
@@ -910,6 +967,20 @@ mod tests {
         assert!(!should_use_inline(false, false, true, true, true));
         assert!(!should_use_inline(false, false, false, false, true));
         assert!(!should_use_inline(false, false, false, true, false));
+    }
+
+    #[test]
+    fn formats_completed_item_report() {
+        let mut item = ItemView::new("editors/neovim".into());
+        item.status = ItemStatus::Done;
+        item.total_files = 3;
+        item.processed_files = 3;
+        item.copied_files = 3;
+        item.copied_bytes = 1536;
+        assert_eq!(
+            format_item_report(&item, 100),
+            "✓ editors/neovim  3/3 files  1.5 KiB  done"
+        );
     }
 
     #[test]

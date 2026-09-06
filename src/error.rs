@@ -16,7 +16,7 @@ pub enum Error {
     #[error("cannot run abstract collection directly: {0:?}")]
     AbstractCollection(PathBuf),
 
-    #[error("item not found: {0:?}")]
+    #[error("items not found: {0:?}")]
     ItemNotFound(PathBuf),
 
     #[error("{0}")]
