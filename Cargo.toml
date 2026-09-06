@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-jsonschema = "0.54.0"
-schemars = { version = "1.2.2", features = ["derive"] }
-serde = { version = "1.0.229", features = ["derive"] }
-yaml_serde = "0.10.7"
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0"
+walkdir = "2.5"
+yaml_serde = "0.10"
