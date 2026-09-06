@@ -3,7 +3,11 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "shed", version, about = "Sync dotfiles between system and shed")]
+#[command(
+    name = "shed",
+    version,
+    about = "Sync dotfiles between system and shed"
+)]
 pub struct Cli {
     /// Path to collection YAML
     #[arg(short, long)]
@@ -20,6 +24,10 @@ pub struct Cli {
     /// Print detailed output
     #[arg(short, long)]
     pub verbose: bool,
+
+    /// Disable the interactive progress display
+    #[arg(long, global = true)]
+    pub no_progress: bool,
 
     #[command(subcommand)]
     pub command: Command,

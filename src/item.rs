@@ -17,6 +17,7 @@ pub struct ItemEntry {
 
 pub struct ResolvedItem {
     pub name: String,
+    pub shed_base: PathBuf,
     pub entries: Vec<ResolvedEntry>,
 }
 
@@ -25,7 +26,11 @@ pub struct ResolvedEntry {
     pub shed: PathBuf,
 }
 
-pub fn load_all(item_refs: &[String], config_dir: &Path, sync_dir: &Path) -> Result<Vec<ResolvedItem>, Error> {
+pub fn load_all(
+    item_refs: &[String],
+    config_dir: &Path,
+    sync_dir: &Path,
+) -> Result<Vec<ResolvedItem>, Error> {
     let mut items = Vec::new();
 
     for item_ref in item_refs {
@@ -64,15 +69,16 @@ fn load_item(item_ref: &str, config_dir: &Path, sync_dir: &Path) -> Result<Resol
 
     Ok(ResolvedItem {
         name: item_ref.to_string(),
+        shed_base,
         entries: resolved_entries,
     })
 }
 
 fn expand_home(path: &str) -> PathBuf {
-    if path.starts_with("$HOME") {
-        if let Ok(home) = env::var("HOME") {
-            return PathBuf::from(path.replacen("$HOME", &home, 1));
-        }
+    if path.starts_with("$HOME")
+        && let Ok(home) = env::var("HOME")
+    {
+        return PathBuf::from(path.replacen("$HOME", &home, 1));
     }
     PathBuf::from(path)
 }

@@ -65,9 +65,9 @@ fn resolve_recursive(
     all_items: &mut Vec<String>,
     seen_items: &mut HashSet<String>,
 ) -> Result<(), Error> {
-    let canonical = path.canonicalize().map_err(|e| {
-        Error::Io(format!("collection {:?}", path), e)
-    })?;
+    let canonical = path
+        .canonicalize()
+        .map_err(|e| Error::Io(format!("collection {:?}", path), e))?;
 
     // Check for cycle first (before checking visited)
     if chain.contains(&name.to_string()) {
@@ -112,8 +112,8 @@ fn resolve_recursive(
 }
 
 fn load_collection(path: &Path) -> Result<CollectionFile, Error> {
-    let content = fs::read_to_string(path)
-        .map_err(|e| Error::Io(format!("reading {:?}", path), e))?;
+    let content =
+        fs::read_to_string(path).map_err(|e| Error::Io(format!("reading {:?}", path), e))?;
     yaml_serde::from_str(&content).map_err(|e| Error::Yaml(path.to_path_buf(), e))
 }
 

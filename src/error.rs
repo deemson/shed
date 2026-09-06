@@ -21,4 +21,7 @@ pub enum Error {
 
     #[error("{0}")]
     MissingArg(String),
+
+    #[error("failed to install Ctrl-C handler: {0}")]
+    CtrlC(#[source] ctrlc::Error),
 }
