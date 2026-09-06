@@ -2,14 +2,17 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::error::Error;
 
-#[derive(Deserialize)]
-struct ItemEntry {
-    system: String,
-    shed: String,
+#[derive(Deserialize, JsonSchema)]
+pub struct ItemEntry {
+    /// Absolute system path (supports $HOME expansion)
+    pub system: String,
+    /// Relative path within the item's storage directory
+    pub shed: String,
 }
 
 pub struct ResolvedItem {
@@ -22,19 +25,20 @@ pub struct ResolvedEntry {
     pub shed: PathBuf,
 }
 
-pub fn load_all(item_refs: &[String], items_dir: &Path) -> Result<Vec<ResolvedItem>, Error> {
+pub fn load_all(item_refs: &[String], config_dir: &Path, sync_dir: &Path) -> Result<Vec<ResolvedItem>, Error> {
     let mut items = Vec::new();
 
     for item_ref in item_refs {
-        let item = load_item(item_ref, items_dir)?;
+        let item = load_item(item_ref, config_dir, sync_dir)?;
         items.push(item);
     }
 
     Ok(items)
 }
 
-fn load_item(item_ref: &str, items_dir: &Path) -> Result<ResolvedItem, Error> {
-    let yaml_path = items_dir.join(format!("{}.yaml", item_ref));
+fn load_item(item_ref: &str, config_dir: &Path, sync_dir: &Path) -> Result<ResolvedItem, Error> {
+    // Item YAML is resolved from config directory
+    let yaml_path = config_dir.join(format!("{}.yaml", item_ref));
 
     if !yaml_path.exists() {
         return Err(Error::ItemNotFound(yaml_path));
@@ -46,9 +50,9 @@ fn load_item(item_ref: &str, items_dir: &Path) -> Result<ResolvedItem, Error> {
     let entries: Vec<ItemEntry> =
         yaml_serde::from_str(&content).map_err(|e| Error::Yaml(yaml_path.clone(), e))?;
 
-    // Derive shed base directory from item path
-    // e.g., items/editors/neovim.yaml -> items/editors/neovim/
-    let shed_base = items_dir.join(item_ref);
+    // Shed paths are resolved from sync directory (cwd)
+    // e.g., editors/neovim -> <sync_dir>/editors/neovim/
+    let shed_base = sync_dir.join(item_ref);
 
     let resolved_entries = entries
         .into_iter()
@@ -71,4 +75,10 @@ fn expand_home(path: &str) -> PathBuf {
         }
     }
     PathBuf::from(path)
+}
+
+pub fn schema() -> schemars::Schema {
+    schemars::generate::SchemaSettings::default()
+        .into_generator()
+        .into_root_schema_for::<Vec<ItemEntry>>()
 }

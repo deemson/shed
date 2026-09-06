@@ -7,11 +7,11 @@ use clap::{Parser, Subcommand};
 pub struct Cli {
     /// Path to collection YAML
     #[arg(short, long)]
-    pub collection: PathBuf,
+    pub collection: Option<PathBuf>,
 
     /// Path to items directory
     #[arg(short, long)]
-    pub items_dir: PathBuf,
+    pub items_dir: Option<PathBuf>,
 
     /// Print operations without executing
     #[arg(long)]
@@ -28,9 +28,39 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Command {
     /// Copy from system to shed
-    Put,
+    Put {
+        /// Target directory (default: current directory)
+        #[arg(value_name = "DIR")]
+        target: Option<PathBuf>,
+    },
     /// Copy from shed to system
-    Get,
+    Get {
+        /// Source directory (default: current directory)
+        #[arg(value_name = "DIR")]
+        source: Option<PathBuf>,
+    },
+    /// Configuration utilities
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommand,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ConfigCommand {
+    /// Print JSON schemas
+    Schema {
+        #[command(subcommand)]
+        command: SchemaCommand,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum SchemaCommand {
+    /// Print JSON schema for collection YAML
+    Collections,
+    /// Print JSON schema for item YAML
+    Items,
 }
 
 impl Cli {

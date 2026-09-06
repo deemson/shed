@@ -18,4 +18,7 @@ pub enum Error {
 
     #[error("item not found: {0:?}")]
     ItemNotFound(PathBuf),
+
+    #[error("{0}")]
+    MissingArg(String),
 }

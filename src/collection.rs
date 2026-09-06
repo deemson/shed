@@ -2,18 +2,22 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::error::Error;
 
-#[derive(Deserialize, Default)]
-struct CollectionFile {
+#[derive(Deserialize, JsonSchema, Default)]
+pub struct CollectionFile {
+    /// If true, this collection cannot be run directly (only inherited)
+    #[serde(default, rename = "abstract")]
+    pub r#abstract: bool,
+    /// List of collection names to inherit (relative to this file's directory)
     #[serde(default)]
-    r#abstract: bool,
+    pub inherit: Vec<String>,
+    /// List of item references (paths relative to items directory, without .yaml)
     #[serde(default)]
-    inherit: Vec<String>,
-    #[serde(default)]
-    items: Vec<String>,
+    pub items: Vec<String>,
 }
 
 pub struct ResolvedCollection {
@@ -21,13 +25,12 @@ pub struct ResolvedCollection {
     pub item_refs: Vec<String>,
 }
 
-pub fn resolve(collection_path: &Path) -> Result<ResolvedCollection, Error> {
+pub fn resolve(collection_path: &Path, config_dir: &Path) -> Result<ResolvedCollection, Error> {
     let mut visited = HashSet::new();
     let mut chain = Vec::new();
     let mut all_items = Vec::new();
     let mut seen_items = HashSet::new();
 
-    let collection_dir = collection_path.parent().unwrap_or(Path::new("."));
     let root_name = collection_path
         .file_stem()
         .and_then(|s| s.to_str())
@@ -40,7 +43,7 @@ pub fn resolve(collection_path: &Path) -> Result<ResolvedCollection, Error> {
     resolve_recursive(
         &root_name,
         collection_path,
-        collection_dir,
+        config_dir,
         &mut visited,
         &mut chain,
         &mut all_items,
@@ -112,4 +115,10 @@ fn load_collection(path: &Path) -> Result<CollectionFile, Error> {
     let content = fs::read_to_string(path)
         .map_err(|e| Error::Io(format!("reading {:?}", path), e))?;
     yaml_serde::from_str(&content).map_err(|e| Error::Yaml(path.to_path_buf(), e))
+}
+
+pub fn schema() -> schemars::Schema {
+    schemars::generate::SchemaSettings::default()
+        .into_generator()
+        .into_root_schema_for::<CollectionFile>()
 }
