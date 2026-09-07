@@ -9,10 +9,47 @@ A shed is an ordinary directory, typically a dotfiles repository. Shed does not 
 
 ## Installation
 
-Shed currently installs from source and requires Rust and Cargo.
+### Homebrew (macOS)
+
+The Homebrew tap provides native binaries for Apple Silicon and Intel Macs:
 
 ```sh
-cargo install --git https://github.com/deemson/shed.git --locked
+brew install deemson/tap/shed
+```
+
+Homebrew is the supported binary installation route on macOS. The raw macOS
+archives attached to GitHub releases are unsigned and are not intended for
+direct browser installation.
+
+### NixOS
+
+Official tags expose a flake package for x86_64 and aarch64 Linux. Release
+outputs are served by the public `deemson-shed` Cachix cache, with a local
+source build as the automatic fallback:
+
+```sh
+nix profile install github:deemson/shed/v0.1.0 --accept-flake-config
+```
+
+`--accept-flake-config` explicitly accepts the public cache URL and signing key
+declared by the flake. Replace `v0.1.0` with the release you want; pinning the
+tag keeps installations reproducible.
+
+Static musl archives that run directly on NixOS are also available from each
+[GitHub release](https://github.com/deemson/shed/releases):
+
+- `shed-x86_64-unknown-linux-musl.tar.gz`
+- `shed-aarch64-unknown-linux-musl.tar.gz`
+
+Verify the adjacent `.sha256` file before extracting an archive and placing
+`shed` on your `PATH`.
+
+### Build from source
+
+Building from source requires Rust 1.97.1 and Cargo:
+
+```sh
+cargo install --git https://github.com/deemson/shed.git --tag v0.1.0 --locked
 ```
 
 To install from a local checkout instead:

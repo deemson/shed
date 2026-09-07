@@ -2,6 +2,10 @@
 name = "shed"
 version = "0.1.0"
 edition = "2024"
+description = "Sync dotfiles between system paths and a local shed"
+license = "MIT"
+repository = "https://github.com/deemson/shed"
+homepage = "https://github.com/deemson/shed"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
@@ -19,3 +23,11 @@ yaml_serde = "0.10"
 
 [dev-dependencies]
 tempfile = "3"
+
+[profile.release]
+strip = "symbols"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

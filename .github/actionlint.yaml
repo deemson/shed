@@ -1,0 +1,6 @@
+# Ignore shellcheck findings in cargo-dist's generated matrix snippets.
+paths:
+  .github/workflows/release.yml:
+    ignore:
+      - 'shellcheck reported issue in this script: SC2086:.+'
+      - 'shellcheck reported issue in this script: SC2129:.+'
