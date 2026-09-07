@@ -66,10 +66,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          tap=shed-release/test
           brew uninstall --force shed >/dev/null 2>&1 || true
-          brew install --formula "$PWD/formula/shed.rb"
-          brew test shed
-          shed --version
+          brew untap --force "$tap" >/dev/null 2>&1 || true
+          brew tap-new "$tap"
+          cp formula/shed.rb "$(brew --repository "$tap")/Formula/shed.rb"
+          brew install "$tap/shed"
+          brew test "$tap/shed"
+          "$(brew --prefix "$tap/shed")/bin/shed" --version
 
   cache:
     name: Publish Cachix closures
