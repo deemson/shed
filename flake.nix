@@ -1,6 +1,13 @@
 {
   description = "Shed dotfile synchronization CLI";
 
+  nixConfig = {
+    extra-substituters = [ "https://deemson-shed.cachix.org" ];
+    extra-trusted-public-keys = [
+      "deemson-shed.cachix.org-1:0Hvy3HvZGBYmTCkxjo1KgkQu8DG7vUw63FCOOybe9l0="
+    ];
+  };
+
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     fenix = {
