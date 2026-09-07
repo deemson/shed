@@ -9,7 +9,8 @@ use std::process::ExitCode;
 
 use cli::{Cli, Command, ConfigCommand, SchemaCommand};
 
-fn main() -> ExitCode {
+#[tokio::main(flavor = "multi_thread")]
+async fn main() -> ExitCode {
     let cli = Cli::parse_args();
 
     if let Command::Config {
@@ -24,7 +25,7 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    let result = run(&cli);
+    let result = run(&cli).await;
 
     match result {
         Ok(outcome) => outcome.exit_code(),
@@ -35,7 +36,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(cli: &Cli) -> Result<sync::Outcome, error::Error> {
+async fn run(cli: &Cli) -> Result<sync::Outcome, error::Error> {
     let collection_arg = cli.collection.as_ref().ok_or_else(|| {
         error::Error::MissingArg("--collection is required for put/get".to_string())
     })?;
@@ -102,4 +103,5 @@ fn run(cli: &Cli) -> Result<sync::Outcome, error::Error> {
         cli.no_progress,
         &cancellation,
     )
+    .await
 }

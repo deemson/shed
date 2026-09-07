@@ -1,5 +1,5 @@
 use std::io::{self, IsTerminal, Stderr};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use ratatui::backend::{Backend, CrosstermBackend};
@@ -53,6 +53,104 @@ pub enum Event<'a> {
         message: &'a str,
     },
     Finish(&'a Summary),
+}
+
+#[derive(Clone, Debug)]
+pub enum OwnedEvent {
+    ScanStarted {
+        item: usize,
+    },
+    ScanPath {
+        item: usize,
+        logical_path: PathBuf,
+    },
+    ScanFinished {
+        item: usize,
+        total_files: usize,
+    },
+    PlanFinished {
+        total_files: usize,
+    },
+    ItemStarted {
+        item: usize,
+    },
+    FileStarted {
+        item: usize,
+        logical_path: PathBuf,
+        src: PathBuf,
+        dst: PathBuf,
+    },
+    FileFinished {
+        item: usize,
+        copied: bool,
+        bytes: u64,
+    },
+    ItemFinished {
+        item: usize,
+        status: ItemStatus,
+    },
+    Warning {
+        item: Option<usize>,
+        message: String,
+    },
+    Error {
+        item: Option<usize>,
+        message: String,
+    },
+    Finish(Summary),
+}
+
+impl OwnedEvent {
+    pub fn borrowed(&self) -> Event<'_> {
+        match self {
+            Self::ScanStarted { item } => Event::ScanStarted { item: *item },
+            Self::ScanPath { item, logical_path } => Event::ScanPath {
+                item: *item,
+                logical_path,
+            },
+            Self::ScanFinished { item, total_files } => Event::ScanFinished {
+                item: *item,
+                total_files: *total_files,
+            },
+            Self::PlanFinished { total_files } => Event::PlanFinished {
+                total_files: *total_files,
+            },
+            Self::ItemStarted { item } => Event::ItemStarted { item: *item },
+            Self::FileStarted {
+                item,
+                logical_path,
+                src,
+                dst,
+            } => Event::FileStarted {
+                item: *item,
+                logical_path,
+                src,
+                dst,
+            },
+            Self::FileFinished {
+                item,
+                copied,
+                bytes,
+            } => Event::FileFinished {
+                item: *item,
+                copied: *copied,
+                bytes: *bytes,
+            },
+            Self::ItemFinished { item, status } => Event::ItemFinished {
+                item: *item,
+                status: *status,
+            },
+            Self::Warning { item, message } => Event::Warning {
+                item: *item,
+                message,
+            },
+            Self::Error { item, message } => Event::Error {
+                item: *item,
+                message,
+            },
+            Self::Finish(summary) => Event::Finish(summary),
+        }
+    }
 }
 
 pub trait Reporter {
@@ -239,6 +337,7 @@ impl InlineReporter {
                 self.draw(true)
             }
             Event::ScanPath { item, logical_path } => {
+                self.state.current = Some(item);
                 self.state.spinner = self.state.spinner.wrapping_add(1);
                 if let Some(view) = self.state.items.get_mut(item) {
                     view.current_path = display_path(logical_path);
@@ -258,6 +357,13 @@ impl InlineReporter {
                     view.current_path.clear();
                 }
                 self.state.scanned_items += 1;
+                if self.state.current == Some(item) {
+                    self.state.current = self
+                        .state
+                        .items
+                        .iter()
+                        .position(|view| view.status == ItemStatus::Scanning);
+                }
                 self.draw(true)
             }
             Event::PlanFinished { total_files } => {
@@ -276,6 +382,7 @@ impl InlineReporter {
             Event::FileStarted {
                 item, logical_path, ..
             } => {
+                self.state.current = Some(item);
                 if let Some(view) = self.state.items.get_mut(item) {
                     view.current_path = display_path(logical_path);
                 }
@@ -304,6 +411,13 @@ impl InlineReporter {
                 if let Some(view) = self.state.items.get_mut(item) {
                     view.status = status;
                     view.current_path.clear();
+                }
+                if self.state.current == Some(item) {
+                    self.state.current = self
+                        .state
+                        .items
+                        .iter()
+                        .position(|view| view.status == ItemStatus::Copying);
                 }
                 self.draw(true)
             }
@@ -366,11 +480,13 @@ impl InlineReporter {
     }
 
     fn finish(&mut self, summary: &Summary) -> io::Result<()> {
-        if summary.cancelled
-            && let Some(item) = self.state.current
-            && let Some(view) = self.state.items.get_mut(item)
-        {
-            view.status = ItemStatus::Cancelled;
+        if summary.cancelled {
+            for view in &mut self.state.items {
+                if matches!(view.status, ItemStatus::Scanning | ItemStatus::Copying) {
+                    view.status = ItemStatus::Cancelled;
+                    view.current_path.clear();
+                }
+            }
         }
         self.draw(true)?;
 

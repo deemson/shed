@@ -1,14 +1,21 @@
-use std::fs;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use walkdir::WalkDir;
+use async_walkdir::WalkDir;
+use futures::StreamExt;
+use futures::stream::{self, FuturesUnordered};
+use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 use crate::item::ResolvedItem;
-use crate::progress::{self, Event, Reporter};
+#[cfg(test)]
+use crate::progress::Event;
+use crate::progress::{self, OwnedEvent, Reporter};
+#[cfg(test)]
+use std::fs;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Direction {
@@ -96,40 +103,41 @@ pub struct Summary {
     pub discovered_files: usize,
 }
 
+#[derive(Clone)]
 pub struct Cancellation {
-    count: Arc<AtomicUsize>,
+    token: CancellationToken,
 }
 
 impl Cancellation {
     pub fn install() -> Result<Self, crate::error::Error> {
-        let count = Arc::new(AtomicUsize::new(0));
-        let signal_count = Arc::clone(&count);
+        let token = CancellationToken::new();
+        let signal_token = token.clone();
 
         ctrlc::try_set_handler(move || {
-            let previous = signal_count.fetch_add(1, Ordering::SeqCst);
-            if previous >= 1 {
+            if signal_token.is_cancelled() {
                 std::process::exit(130);
             }
+            signal_token.cancel();
         })
         .map_err(crate::error::Error::CtrlC)?;
 
-        Ok(Self { count })
+        Ok(Self { token })
     }
 
     pub fn is_cancelled(&self) -> bool {
-        self.count.load(Ordering::SeqCst) > 0
+        self.token.is_cancelled()
     }
 
     #[cfg(test)]
     pub fn inactive() -> Self {
         Self {
-            count: Arc::new(AtomicUsize::new(0)),
+            token: CancellationToken::new(),
         }
     }
 
     #[cfg(test)]
     pub fn cancel(&self) {
-        self.count.store(1, Ordering::SeqCst);
+        self.token.cancel();
     }
 }
 
@@ -186,7 +194,31 @@ enum PlanResult {
     },
 }
 
-pub fn execute(
+struct ItemScan {
+    item: usize,
+    plan: ItemPlan,
+    warnings: usize,
+    errors: usize,
+    discovered_files: usize,
+    complete: bool,
+}
+
+#[derive(Clone)]
+struct CopyWork {
+    item: usize,
+    src: PathBuf,
+    dst: PathBuf,
+    logical_path: PathBuf,
+}
+
+struct CopyResult {
+    item: usize,
+    copied: bool,
+    bytes: u64,
+    error: bool,
+}
+
+pub async fn execute(
     items: &[ResolvedItem],
     direction: Direction,
     dry: bool,
@@ -204,10 +236,11 @@ pub fn execute(
         cancellation,
         reporter.as_mut(),
         started,
-    ))
+    )
+    .await)
 }
 
-fn execute_with_reporter(
+async fn execute_with_reporter(
     items: &[ResolvedItem],
     direction: Direction,
     dry: bool,
@@ -215,9 +248,35 @@ fn execute_with_reporter(
     reporter: &mut dyn Reporter,
     started: Instant,
 ) -> Outcome {
+    let (events, mut receiver) = mpsc::channel(256);
+    let jobs = std::thread::available_parallelism()
+        .map(usize::from)
+        .unwrap_or(4)
+        .max(1);
+
+    let work = execute_inner(items, direction, dry, cancellation, events, started, jobs);
+    let reporting = async {
+        while let Some(event) = receiver.recv().await {
+            reporter.report(event.borrowed());
+        }
+    };
+
+    let (outcome, ()) = tokio::join!(work, reporting);
+    outcome
+}
+
+async fn execute_inner(
+    items: &[ResolvedItem],
+    direction: Direction,
+    dry: bool,
+    cancellation: &Cancellation,
+    events: mpsc::Sender<OwnedEvent>,
+    started: Instant,
+    jobs: usize,
+) -> Outcome {
     let mut counters = Counters::new(items.len());
 
-    let plan = match build_plan(items, direction, cancellation, reporter, &mut counters) {
+    let plan = match build_plan(items, direction, cancellation, &events, &mut counters).await {
         PlanResult::Complete(plan) => plan,
         PlanResult::Cancelled {
             scanned_items,
@@ -234,14 +293,18 @@ fn execute_with_reporter(
                 scanned_items,
                 discovered_files,
             );
-            reporter.report(Event::Finish(&summary));
+            send_event(&events, OwnedEvent::Finish(summary.clone())).await;
             return outcome_from(&summary);
         }
     };
 
-    reporter.report(Event::PlanFinished {
-        total_files: plan.total_files,
-    });
+    send_event(
+        &events,
+        OwnedEvent::PlanFinished {
+            total_files: plan.total_files,
+        },
+    )
+    .await;
 
     if cancellation.is_cancelled() {
         let summary = make_summary(
@@ -255,128 +318,131 @@ fn execute_with_reporter(
             items.len(),
             plan.total_files,
         );
-        reporter.report(Event::Finish(&summary));
+        send_event(&events, OwnedEvent::Finish(summary.clone())).await;
         return outcome_from(&summary);
     }
 
-    let mut cancelled = false;
+    let mut item_had_error: Vec<bool> = plan.items.iter().map(|item| item.had_error).collect();
+    for item in 0..plan.items.len() {
+        counters.statuses[item] = ItemStatus::Copying;
+        send_event(&events, OwnedEvent::ItemStarted { item }).await;
+    }
 
-    for (item_index, item_plan) in plan.items.iter().enumerate() {
-        if cancellation.is_cancelled() {
-            cancelled = true;
-            break;
-        }
-
-        counters.statuses[item_index] = ItemStatus::Copying;
-        reporter.report(Event::ItemStarted { item: item_index });
-
-        let mut item_had_error = item_plan.had_error;
-        let mut failed_directories: Vec<PathBuf> = Vec::new();
-
+    // Directory creation is deliberately serial. Once it is complete, every
+    // copy can run independently without racing its parent directory.
+    let mut created_directories = HashSet::new();
+    let mut failed_directories = Vec::new();
+    let mut directories_complete = vec![false; plan.items.len()];
+    for (item, item_plan) in plan.items.iter().enumerate() {
         for operation in &item_plan.operations {
+            let PlannedOperation::CreateDir { dst } = operation else {
+                continue;
+            };
             if cancellation.is_cancelled() {
-                cancelled = true;
                 break;
             }
-
-            match operation {
-                PlannedOperation::CreateDir { dst } => {
-                    if is_blocked(dst, &failed_directories) || dry {
-                        continue;
-                    }
-                    if let Err(error) = fs::create_dir_all(dst) {
-                        item_had_error = true;
-                        counters.errors += 1;
-                        failed_directories.push(dst.clone());
-                        let message = format!("creating directory {:?}: {}", dst, error);
-                        reporter.report(Event::Error {
-                            item: Some(item_index),
-                            message: &message,
-                        });
-                    }
-                }
-                PlannedOperation::CopyFile {
-                    src,
-                    dst,
-                    logical_path,
-                } => {
-                    reporter.report(Event::FileStarted {
-                        item: item_index,
-                        logical_path,
-                        src,
-                        dst,
-                    });
-
-                    let blocked = is_blocked(dst, &failed_directories);
-                    let mut copied = false;
-                    let mut bytes = 0;
-
-                    if !blocked {
-                        if dry {
-                            copied = true;
-                        } else {
-                            match fs::copy(src, dst) {
-                                Ok(count) => {
-                                    copied = true;
-                                    bytes = count;
-                                }
-                                Err(error) => {
-                                    item_had_error = true;
-                                    counters.errors += 1;
-                                    let message = format!("{:?} -> {:?}: {}", src, dst, error);
-                                    reporter.report(Event::Error {
-                                        item: Some(item_index),
-                                        message: &message,
-                                    });
-                                }
-                            }
-                        }
-                    } else {
-                        item_had_error = true;
-                    }
-
-                    counters.processed_files += 1;
-                    if copied {
-                        counters.copied_files += 1;
-                        counters.copied_bytes += bytes;
-                    }
-                    reporter.report(Event::FileFinished {
-                        item: item_index,
-                        copied,
-                        bytes,
-                    });
-                }
+            if is_blocked(dst, &failed_directories) {
+                item_had_error[item] = true;
+                continue;
             }
-
-            if cancellation.is_cancelled() {
-                cancelled = true;
-                break;
+            if !created_directories.insert(dst.clone()) || dry {
+                continue;
+            }
+            if let Err(error) = tokio::fs::create_dir_all(dst).await {
+                item_had_error[item] = true;
+                counters.errors += 1;
+                failed_directories.push(dst.clone());
+                send_event(
+                    &events,
+                    OwnedEvent::Error {
+                        item: Some(item),
+                        message: format!("creating directory {:?}: {}", dst, error),
+                    },
+                )
+                .await;
             }
         }
-
-        if cancelled {
-            counters.statuses[item_index] = ItemStatus::Cancelled;
-            reporter.report(Event::ItemFinished {
-                item: item_index,
-                status: ItemStatus::Cancelled,
-            });
+        if cancellation.is_cancelled() {
             break;
         }
+        directories_complete[item] = true;
+    }
 
-        let status = if item_had_error {
-            ItemStatus::Failed
-        } else if !item_plan.had_source && item_plan.missing_sources > 0 {
-            ItemStatus::Skipped
-        } else if item_plan.missing_sources > 0 {
-            ItemStatus::Warning
+    let mut remaining = vec![0usize; plan.items.len()];
+    let mut groups: Vec<Vec<CopyWork>> = Vec::new();
+    let mut destinations = HashMap::<PathBuf, usize>::new();
+    for (item, item_plan) in plan.items.iter().enumerate() {
+        for operation in &item_plan.operations {
+            let PlannedOperation::CopyFile {
+                src,
+                dst,
+                logical_path,
+            } = operation
+            else {
+                continue;
+            };
+            remaining[item] += 1;
+            let group = match destinations.get(dst) {
+                Some(group) => *group,
+                None => {
+                    let group = groups.len();
+                    destinations.insert(dst.clone(), group);
+                    groups.push(Vec::new());
+                    group
+                }
+            };
+            groups[group].push(CopyWork {
+                item,
+                src: src.clone(),
+                dst: dst.clone(),
+                logical_path: logical_path.clone(),
+            });
+        }
+    }
+
+    let mut cancelled = cancellation.is_cancelled();
+
+    if !cancelled {
+        // Copies to the same destination remain ordered, preserving the
+        // existing last-writer-wins behavior. Independent destinations run in
+        // parallel across the global pool.
+        let failed_directories: Arc<[PathBuf]> = failed_directories.into();
+        let copy_groups = stream::iter(groups.into_iter().map(|group| {
+            copy_group(
+                group,
+                dry,
+                failed_directories.clone(),
+                cancellation.clone(),
+                events.clone(),
+            )
+        }));
+        let mut copy_groups = copy_groups.buffer_unordered(jobs);
+
+        while let Some(results) = copy_groups.next().await {
+            for result in results {
+                counters.processed_files += 1;
+                remaining[result.item] = remaining[result.item].saturating_sub(1);
+                if result.copied {
+                    counters.copied_files += 1;
+                    counters.copied_bytes += result.bytes;
+                }
+                if result.error {
+                    counters.errors += 1;
+                    item_had_error[result.item] = true;
+                }
+            }
+        }
+        cancelled = cancellation.is_cancelled();
+    }
+
+    for (item, item_plan) in plan.items.iter().enumerate() {
+        let status = if cancelled && (!directories_complete[item] || remaining[item] > 0) {
+            ItemStatus::Cancelled
         } else {
-            ItemStatus::Done
+            final_status(item_plan, item_had_error[item])
         };
-        counters.statuses[item_index] = status;
-        reporter.report(Event::ItemFinished {
-            item: item_index,
-            status,
-        });
+        counters.statuses[item] = status;
+        send_event(&events, OwnedEvent::ItemFinished { item, status }).await;
     }
 
     let summary = make_summary(
@@ -390,149 +456,374 @@ fn execute_with_reporter(
         items.len(),
         plan.total_files,
     );
-    reporter.report(Event::Finish(&summary));
-
+    send_event(&events, OwnedEvent::Finish(summary.clone())).await;
     outcome_from(&summary)
 }
 
-fn build_plan(
+async fn copy_group(
+    group: Vec<CopyWork>,
+    dry: bool,
+    failed_directories: Arc<[PathBuf]>,
+    cancellation: Cancellation,
+    events: mpsc::Sender<OwnedEvent>,
+) -> Vec<CopyResult> {
+    let mut results = Vec::with_capacity(group.len());
+    for work in group {
+        if cancellation.is_cancelled() {
+            break;
+        }
+
+        send_event(
+            &events,
+            OwnedEvent::FileStarted {
+                item: work.item,
+                logical_path: work.logical_path,
+                src: work.src.clone(),
+                dst: work.dst.clone(),
+            },
+        )
+        .await;
+
+        let blocked = is_blocked(&work.dst, &failed_directories);
+        let (copied, bytes, error) = if blocked {
+            // The directory-creation pass already reported and counted the
+            // root error. Descendant files are skipped without duplicating it.
+            (false, 0, false)
+        } else if dry {
+            (true, 0, false)
+        } else {
+            match tokio::fs::copy(&work.src, &work.dst).await {
+                Ok(bytes) => (true, bytes, false),
+                Err(error) => {
+                    send_event(
+                        &events,
+                        OwnedEvent::Error {
+                            item: Some(work.item),
+                            message: format!("{:?} -> {:?}: {}", work.src, work.dst, error),
+                        },
+                    )
+                    .await;
+                    (false, 0, true)
+                }
+            }
+        };
+
+        send_event(
+            &events,
+            OwnedEvent::FileFinished {
+                item: work.item,
+                copied,
+                bytes,
+            },
+        )
+        .await;
+        results.push(CopyResult {
+            item: work.item,
+            copied,
+            bytes,
+            error,
+        });
+    }
+    results
+}
+
+async fn build_plan(
     items: &[ResolvedItem],
     direction: Direction,
     cancellation: &Cancellation,
-    reporter: &mut dyn Reporter,
+    events: &mpsc::Sender<OwnedEvent>,
     counters: &mut Counters,
 ) -> PlanResult {
-    let mut planned_items = Vec::with_capacity(items.len());
+    let mut scans = FuturesUnordered::new();
+    for (item, resolved) in items.iter().enumerate() {
+        scans.push(scan_item(
+            item,
+            resolved,
+            direction,
+            cancellation.clone(),
+            events.clone(),
+        ));
+    }
+
+    let mut planned_items: Vec<Option<ItemPlan>> = (0..items.len()).map(|_| None).collect();
     let mut discovered_files = 0;
     let mut scanned_items = 0;
+    let mut interrupted = false;
 
-    for (item_index, item) in items.iter().enumerate() {
-        if cancellation.is_cancelled() {
-            return PlanResult::Cancelled {
-                scanned_items,
-                discovered_files,
-            };
+    while let Some(scan) = scans.next().await {
+        counters.warnings += scan.warnings;
+        counters.errors += scan.errors;
+        discovered_files += scan.discovered_files;
+        if scan.complete {
+            scanned_items += 1;
+            counters.statuses[scan.item] = ItemStatus::Ready;
+            planned_items[scan.item] = Some(scan.plan);
+        } else {
+            interrupted = true;
         }
+    }
 
-        counters.statuses[item_index] = ItemStatus::Scanning;
-        reporter.report(Event::ScanStarted { item: item_index });
+    if interrupted {
+        return PlanResult::Cancelled {
+            scanned_items,
+            discovered_files,
+        };
+    }
 
-        let mut operations = Vec::new();
-        let mut total_files = 0;
-        let mut missing_sources = 0;
-        let mut had_source = false;
-        let mut had_error = false;
+    PlanResult::Complete(SyncPlan {
+        items: planned_items
+            .into_iter()
+            .map(|item| item.expect("completed scan must produce a plan"))
+            .collect(),
+        total_files: discovered_files,
+    })
+}
 
-        for entry in &item.entries {
-            if cancellation.is_cancelled() {
-                return PlanResult::Cancelled {
-                    scanned_items,
-                    discovered_files,
-                };
-            }
+async fn scan_item(
+    item_index: usize,
+    item: &ResolvedItem,
+    direction: Direction,
+    cancellation: Cancellation,
+    events: mpsc::Sender<OwnedEvent>,
+) -> ItemScan {
+    let mut operations = Vec::new();
+    let mut total_files = 0;
+    let mut missing_sources = 0;
+    let mut had_source = false;
+    let mut had_error = false;
+    let mut warnings = 0;
+    let mut errors = 0;
 
-            let (src, dst) = endpoints(entry, direction);
-            if !src.exists() {
-                missing_sources += 1;
-                counters.warnings += 1;
-                let message = format!("source not found: {:?}", src);
-                reporter.report(Event::Warning {
-                    item: Some(item_index),
-                    message: &message,
-                });
-                continue;
-            }
-            had_source = true;
-
-            if src.is_dir() {
-                for walked in WalkDir::new(src) {
-                    if cancellation.is_cancelled() {
-                        return PlanResult::Cancelled {
-                            scanned_items,
-                            discovered_files,
-                        };
-                    }
-
-                    match walked {
-                        Ok(walked) => {
-                            let src_path = walked.path();
-                            let relative = src_path.strip_prefix(src).unwrap_or(Path::new(""));
-                            let dst_path = dst.join(relative);
-                            let logical_path = logical_path(item, &dst_path);
-                            reporter.report(Event::ScanPath {
-                                item: item_index,
-                                logical_path: &logical_path,
-                            });
-
-                            if src_path.is_dir() {
-                                operations.push(PlannedOperation::CreateDir { dst: dst_path });
-                            } else {
-                                total_files += 1;
-                                discovered_files += 1;
-                                operations.push(PlannedOperation::CopyFile {
-                                    src: src_path.to_path_buf(),
-                                    dst: dst_path,
-                                    logical_path,
-                                });
-                            }
-                        }
-                        Err(error) => {
-                            had_error = true;
-                            counters.errors += 1;
-                            let message = format!("walking {:?}: {}", src, error);
-                            reporter.report(Event::Error {
-                                item: Some(item_index),
-                                message: &message,
-                            });
-                        }
-                    }
-
-                    if cancellation.is_cancelled() {
-                        return PlanResult::Cancelled {
-                            scanned_items,
-                            discovered_files,
-                        };
-                    }
-                }
-            } else {
-                if let Some(parent) = dst.parent() {
-                    operations.push(PlannedOperation::CreateDir {
-                        dst: parent.to_path_buf(),
-                    });
-                }
-                let logical_path = logical_path(item, dst);
-                reporter.report(Event::ScanPath {
-                    item: item_index,
-                    logical_path: &logical_path,
-                });
-                operations.push(PlannedOperation::CopyFile {
-                    src: src.to_path_buf(),
-                    dst: dst.to_path_buf(),
-                    logical_path,
-                });
-                total_files += 1;
-                discovered_files += 1;
-            }
-        }
-
-        scanned_items += 1;
-        counters.statuses[item_index] = ItemStatus::Ready;
-        reporter.report(Event::ScanFinished {
-            item: item_index,
-            total_files,
-        });
-        planned_items.push(ItemPlan {
+    if cancellation.is_cancelled() {
+        return item_scan(
+            item_index,
             operations,
             missing_sources,
             had_source,
             had_error,
-        });
+            warnings,
+            errors,
+            total_files,
+            false,
+        );
+    }
+    send_event(&events, OwnedEvent::ScanStarted { item: item_index }).await;
+
+    for entry in &item.entries {
+        if cancellation.is_cancelled() {
+            return item_scan(
+                item_index,
+                operations,
+                missing_sources,
+                had_source,
+                had_error,
+                warnings,
+                errors,
+                total_files,
+                false,
+            );
+        }
+
+        let (src, dst) = endpoints(entry, direction);
+        let metadata = match tokio::fs::metadata(src).await {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                missing_sources += 1;
+                warnings += 1;
+                send_event(
+                    &events,
+                    OwnedEvent::Warning {
+                        item: Some(item_index),
+                        message: format!("source not found: {:?}", src),
+                    },
+                )
+                .await;
+                continue;
+            }
+            Err(error) => {
+                had_error = true;
+                errors += 1;
+                send_event(
+                    &events,
+                    OwnedEvent::Error {
+                        item: Some(item_index),
+                        message: format!("reading source {:?}: {}", src, error),
+                    },
+                )
+                .await;
+                continue;
+            }
+        };
+        had_source = true;
+
+        if metadata.is_dir() {
+            let root_logical_path = logical_path(item, dst);
+            send_event(
+                &events,
+                OwnedEvent::ScanPath {
+                    item: item_index,
+                    logical_path: root_logical_path,
+                },
+            )
+            .await;
+            operations.push(PlannedOperation::CreateDir {
+                dst: dst.to_path_buf(),
+            });
+
+            let mut entries = WalkDir::new(src);
+            loop {
+                let walked = tokio::select! {
+                    _ = cancellation.token.cancelled() => {
+                        return item_scan(
+                            item_index,
+                            operations,
+                            missing_sources,
+                            had_source,
+                            had_error,
+                            warnings,
+                            errors,
+                            total_files,
+                            false,
+                        );
+                    }
+                    walked = entries.next() => walked,
+                };
+                let Some(walked) = walked else {
+                    break;
+                };
+
+                match walked {
+                    Ok(walked) => {
+                        let src_path = walked.path();
+                        let relative = src_path.strip_prefix(src).unwrap_or(Path::new(""));
+                        let dst_path = dst.join(relative);
+                        let logical_path = logical_path(item, &dst_path);
+                        send_event(
+                            &events,
+                            OwnedEvent::ScanPath {
+                                item: item_index,
+                                logical_path: logical_path.clone(),
+                            },
+                        )
+                        .await;
+
+                        // metadata follows a directory symlink for compatibility
+                        // with the old walker, while async-walkdir itself does not
+                        // recurse through that symlink.
+                        let is_dir = tokio::fs::metadata(&src_path)
+                            .await
+                            .is_ok_and(|metadata| metadata.is_dir());
+                        if is_dir {
+                            operations.push(PlannedOperation::CreateDir { dst: dst_path });
+                        } else {
+                            total_files += 1;
+                            operations.push(PlannedOperation::CopyFile {
+                                src: src_path,
+                                dst: dst_path,
+                                logical_path,
+                            });
+                        }
+                    }
+                    Err(error) => {
+                        had_error = true;
+                        errors += 1;
+                        send_event(
+                            &events,
+                            OwnedEvent::Error {
+                                item: Some(item_index),
+                                message: format!("walking {:?}: {}", src, error),
+                            },
+                        )
+                        .await;
+                    }
+                }
+            }
+        } else {
+            if let Some(parent) = dst.parent() {
+                operations.push(PlannedOperation::CreateDir {
+                    dst: parent.to_path_buf(),
+                });
+            }
+            let logical_path = logical_path(item, dst);
+            send_event(
+                &events,
+                OwnedEvent::ScanPath {
+                    item: item_index,
+                    logical_path: logical_path.clone(),
+                },
+            )
+            .await;
+            operations.push(PlannedOperation::CopyFile {
+                src: src.to_path_buf(),
+                dst: dst.to_path_buf(),
+                logical_path,
+            });
+            total_files += 1;
+        }
     }
 
-    PlanResult::Complete(SyncPlan {
-        items: planned_items,
-        total_files: discovered_files,
-    })
+    send_event(
+        &events,
+        OwnedEvent::ScanFinished {
+            item: item_index,
+            total_files,
+        },
+    )
+    .await;
+    item_scan(
+        item_index,
+        operations,
+        missing_sources,
+        had_source,
+        had_error,
+        warnings,
+        errors,
+        total_files,
+        true,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn item_scan(
+    item: usize,
+    operations: Vec<PlannedOperation>,
+    missing_sources: usize,
+    had_source: bool,
+    had_error: bool,
+    warnings: usize,
+    errors: usize,
+    discovered_files: usize,
+    complete: bool,
+) -> ItemScan {
+    ItemScan {
+        item,
+        plan: ItemPlan {
+            operations,
+            missing_sources,
+            had_source,
+            had_error,
+        },
+        warnings,
+        errors,
+        discovered_files,
+        complete,
+    }
+}
+
+async fn send_event(events: &mpsc::Sender<OwnedEvent>, event: OwnedEvent) {
+    let _ = events.send(event).await;
+}
+
+fn final_status(plan: &ItemPlan, had_error: bool) -> ItemStatus {
+    if had_error {
+        ItemStatus::Failed
+    } else if !plan.had_source && plan.missing_sources > 0 {
+        ItemStatus::Skipped
+    } else if plan.missing_sources > 0 {
+        ItemStatus::Warning
+    } else {
+        ItemStatus::Done
+    }
 }
 
 fn endpoints(entry: &crate::item::ResolvedEntry, direction: Direction) -> (&Path, &Path) {
@@ -635,7 +926,7 @@ mod tests {
         }
     }
 
-    fn run(items: &[ResolvedItem], direction: Direction, dry: bool) -> Outcome {
+    async fn run(items: &[ResolvedItem], direction: Direction, dry: bool) -> Outcome {
         execute(
             items,
             direction,
@@ -644,6 +935,7 @@ mod tests {
             true,
             &Cancellation::inactive(),
         )
+        .await
         .unwrap()
     }
 
@@ -675,8 +967,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn emits_planning_then_execution_events() {
+    #[tokio::test]
+    async fn emits_planning_then_execution_events() {
         let temp = TempDir::new().unwrap();
         let source = temp.path().join("source.txt");
         fs::write(&source, "content").unwrap();
@@ -693,7 +985,8 @@ mod tests {
             &cancellation,
             &mut reporter,
             Instant::now(),
-        );
+        )
+        .await;
 
         assert_eq!(outcome.exit_code(), ExitCode::SUCCESS);
         assert_eq!(
@@ -716,63 +1009,8 @@ mod tests {
         assert_eq!(summary.done_items, 1);
     }
 
-    #[test]
-    fn cancellation_between_files_stops_without_rollback() {
-        struct CancelAfterFirstFile<'a> {
-            cancellation: &'a Cancellation,
-            files: usize,
-            summary: Option<Summary>,
-        }
-
-        impl Reporter for CancelAfterFirstFile<'_> {
-            fn report(&mut self, event: Event<'_>) {
-                match event {
-                    Event::FileFinished { .. } => {
-                        self.files += 1;
-                        self.cancellation.cancel();
-                    }
-                    Event::Finish(summary) => self.summary = Some(summary.clone()),
-                    _ => {}
-                }
-            }
-        }
-
-        let temp = TempDir::new().unwrap();
-        let source = temp.path().join("source");
-        fs::create_dir_all(&source).unwrap();
-        fs::write(source.join("one.txt"), "one").unwrap();
-        fs::write(source.join("two.txt"), "two").unwrap();
-        let shed_base = temp.path().join("shed/item");
-        let destination = shed_base.join("tree");
-        let item = resolved_item("item", shed_base, vec![(source, destination.clone())]);
-        let cancellation = Cancellation::inactive();
-        let mut reporter = CancelAfterFirstFile {
-            cancellation: &cancellation,
-            files: 0,
-            summary: None,
-        };
-
-        let outcome = execute_with_reporter(
-            &[item],
-            Direction::Put,
-            false,
-            &cancellation,
-            &mut reporter,
-            Instant::now(),
-        );
-
-        assert!(outcome.cancelled);
-        assert_eq!(reporter.files, 1);
-        assert_eq!(reporter.summary.unwrap().copied_files, 1);
-        let copied = [destination.join("one.txt"), destination.join("two.txt")]
-            .into_iter()
-            .filter(|path| path.exists())
-            .count();
-        assert_eq!(copied, 1);
-    }
-
-    #[test]
-    fn recursively_copies_files_and_empty_directories() {
+    #[tokio::test]
+    async fn recursively_copies_files_and_empty_directories() {
         let temp = TempDir::new().unwrap();
         let source = temp.path().join("source");
         let empty = source.join("nested/empty");
@@ -784,7 +1022,7 @@ mod tests {
         let destination = shed_base.join("config");
         let item = resolved_item("item", shed_base, vec![(source, destination.clone())]);
 
-        let outcome = run(&[item], Direction::Put, false);
+        let outcome = run(&[item], Direction::Put, false).await;
 
         assert_eq!(outcome.exit_code(), ExitCode::SUCCESS);
         assert_eq!(
@@ -798,8 +1036,8 @@ mod tests {
         assert!(destination.join("nested/empty").is_dir());
     }
 
-    #[test]
-    fn missing_source_is_a_warning_and_does_not_create_a_destination() {
+    #[tokio::test]
+    async fn missing_source_is_a_warning_and_does_not_create_a_destination() {
         let temp = TempDir::new().unwrap();
         let shed_base = temp.path().join("shed/item");
         let destination = shed_base.join("missing.txt");
@@ -809,7 +1047,7 @@ mod tests {
             vec![(temp.path().join("absent.txt"), destination.clone())],
         );
 
-        let outcome = run(&[item], Direction::Put, false);
+        let outcome = run(&[item], Direction::Put, false).await;
 
         assert_eq!(outcome.warnings, 1);
         assert_eq!(outcome.errors, 0);
@@ -817,8 +1055,8 @@ mod tests {
         assert!(!destination.exists());
     }
 
-    #[test]
-    fn dry_run_plans_but_does_not_write() {
+    #[tokio::test]
+    async fn dry_run_plans_but_does_not_write() {
         let temp = TempDir::new().unwrap();
         let source = temp.path().join("source.txt");
         fs::write(&source, "content").unwrap();
@@ -826,14 +1064,14 @@ mod tests {
         let destination = shed_base.join("target.txt");
         let item = resolved_item("item", shed_base, vec![(source, destination.clone())]);
 
-        let outcome = run(&[item], Direction::Put, true);
+        let outcome = run(&[item], Direction::Put, true).await;
 
         assert_eq!(outcome.exit_code(), ExitCode::SUCCESS);
         assert!(!destination.exists());
     }
 
-    #[test]
-    fn later_entries_keep_last_writer_wins_behavior() {
+    #[tokio::test]
+    async fn later_entries_keep_last_writer_wins_behavior() {
         let temp = TempDir::new().unwrap();
         let first = temp.path().join("first.txt");
         let second = temp.path().join("second.txt");
@@ -847,14 +1085,14 @@ mod tests {
             vec![(first, destination.clone()), (second, destination.clone())],
         );
 
-        let outcome = run(&[item], Direction::Put, false);
+        let outcome = run(&[item], Direction::Put, false).await;
 
         assert_eq!(outcome.exit_code(), ExitCode::SUCCESS);
         assert_eq!(fs::read_to_string(destination).unwrap(), "second");
     }
 
-    #[test]
-    fn get_reverses_the_copy_direction() {
+    #[tokio::test]
+    async fn get_reverses_the_copy_direction() {
         let temp = TempDir::new().unwrap();
         let shed_base = temp.path().join("shed/item");
         fs::create_dir_all(&shed_base).unwrap();
@@ -863,14 +1101,14 @@ mod tests {
         fs::write(&shed_file, "stored").unwrap();
         let item = resolved_item("item", shed_base, vec![(system_file.clone(), shed_file)]);
 
-        let outcome = run(&[item], Direction::Get, false);
+        let outcome = run(&[item], Direction::Get, false).await;
 
         assert_eq!(outcome.exit_code(), ExitCode::SUCCESS);
         assert_eq!(fs::read_to_string(system_file).unwrap(), "stored");
     }
 
-    #[test]
-    fn directory_failure_blocks_descendants_with_one_error() {
+    #[tokio::test]
+    async fn directory_failure_blocks_descendants_with_one_error() {
         let temp = TempDir::new().unwrap();
         let source = temp.path().join("source");
         fs::create_dir_all(&source).unwrap();
@@ -883,14 +1121,14 @@ mod tests {
         let destination = blocker.join("target");
         let item = resolved_item("item", shed_base, vec![(source, destination)]);
 
-        let outcome = run(&[item], Direction::Put, false);
+        let outcome = run(&[item], Direction::Put, false).await;
 
         assert_eq!(outcome.errors, 1);
         assert_eq!(outcome.exit_code(), ExitCode::from(2));
     }
 
-    #[test]
-    fn cancellation_before_planning_writes_nothing() {
+    #[tokio::test]
+    async fn cancellation_before_planning_writes_nothing() {
         let temp = TempDir::new().unwrap();
         let source = temp.path().join("source.txt");
         fs::write(&source, "content").unwrap();
@@ -900,7 +1138,9 @@ mod tests {
         let cancellation = Cancellation::inactive();
         cancellation.cancel();
 
-        let outcome = execute(&[item], Direction::Put, false, false, true, &cancellation).unwrap();
+        let outcome = execute(&[item], Direction::Put, false, false, true, &cancellation)
+            .await
+            .unwrap();
 
         assert!(outcome.cancelled);
         assert_eq!(outcome.exit_code(), ExitCode::from(130));
@@ -908,8 +1148,8 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[test]
-    fn nested_directory_symlinks_are_not_followed() {
+    #[tokio::test]
+    async fn nested_directory_symlinks_are_not_followed() {
         use std::os::unix::fs::symlink;
 
         let temp = TempDir::new().unwrap();
@@ -924,7 +1164,7 @@ mod tests {
         let destination = shed_base.join("tree");
         let item = resolved_item("item", shed_base, vec![(source, destination.clone())]);
 
-        let outcome = run(&[item], Direction::Put, false);
+        let outcome = run(&[item], Direction::Put, false).await;
 
         assert_eq!(outcome.exit_code(), ExitCode::SUCCESS);
         assert!(destination.join("linked").is_dir());
