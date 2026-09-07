@@ -105,11 +105,16 @@ failed workflow.
 
 ## Recovery
 
-Fix the workflow or credential and rerun the failed workflow for the same tag.
-Publication steps are designed to be idempotent. Do not move the tag, delete a
-public release to hide a failure, or replace already-public assets. If an asset
-itself is invalid, publish a new patch version.
+For transient failures or corrected credentials, rerun the failed workflow for
+the same tag. Publication steps are designed to be idempotent. A rerun uses the
+workflow committed at the tag, however, so a workflow-code fix on `main` does
+not alter that run. If a workflow bug occurs after the canonical assets are
+public, manually complete any unaffected downstream publication, fix the
+workflow through a pull request, and use the corrected workflow for the next
+release.
 
-A missing secret or unavailable cache/tap must fail visibly. Rotate a leaked
-credential at its provider and update the corresponding repository secret
-before rerunning.
+Do not move the tag, delete a public release to hide a failure, or replace
+already-public assets. If an asset itself is invalid, publish a new patch
+version. A missing secret or unavailable cache/tap must fail visibly. Rotate a
+leaked credential at its provider and update the corresponding repository
+secret before rerunning.
