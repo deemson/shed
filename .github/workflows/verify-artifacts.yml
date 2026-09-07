@@ -70,7 +70,8 @@ jobs:
               echo "$TARGET unexpectedly has a dynamic ELF interpreter" >&2
               exit 1
             fi
-            ldd "$binary" 2>&1 | grep -Eq 'statically linked|not a dynamic executable'
+            linkage=$(ldd "$binary" 2>&1 || true)
+            grep -Eq 'statically linked|not a dynamic executable' <<<"$linkage"
           fi
 
   nix:
