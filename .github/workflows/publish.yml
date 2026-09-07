@@ -99,8 +99,8 @@ jobs:
             gzip -dc "$dir/closure.nar.gz" | nix-store --import >/dev/null
             output=$(cat "$dir/output-path")
             test -x "$output/bin/shed"
-            test "$("$output/bin/shed" --version)" = "shed $version"
-
+            # The aarch64 closure cannot execute on this x86_64 publishing runner;
+            # both closures were already smoke-tested on native runners.
             cachix push deemson-shed "$output"
             cachix pin deemson-shed "shed-v$version-$system" "$output"
 
@@ -138,9 +138,16 @@ jobs:
           version=$(jq -r '.releases[0].app_version' <<<"$PLAN")
           content=$(base64 -w 0 formula/shed.rb)
           endpoint="repos/deemson/homebrew-tap/contents/Formula/shed.rb"
-          existing_sha=$(gh api "$endpoint" --jq .sha 2>/dev/null || true)
+          existing=$(gh api "$endpoint" 2>/dev/null || true)
+          existing_sha=$(jq -r '.sha // empty' <<<"$existing")
+          existing_content=$(jq -r '.content // empty' <<<"$existing" | tr -d '\n')
 
-          args=(--method PUT -f message="Brew formula update for shed version v$version" -f content="$content")
+          if [[ "$content" == "$existing_content" ]]; then
+            echo "Formula/shed.rb is already current"
+            exit 0
+          fi
+
+          args=(--method PUT -f message="chore: update shed formula to v$version" -f content="$content")
           if [[ -n "$existing_sha" ]]; then
             args+=(-f sha="$existing_sha")
           fi
