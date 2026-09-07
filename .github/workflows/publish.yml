@@ -1,0 +1,190 @@
+name: Publish release channels
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+    secrets:
+      CACHIX_AUTH_TOKEN:
+        required: true
+      HOMEBREW_TAP_TOKEN:
+        required: true
+
+permissions:
+  actions: read
+  contents: write
+  id-token: write
+
+jobs:
+  formula:
+    name: Generate Homebrew formula
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Generate formula from hosted artifacts
+        shell: bash
+        env:
+          PLAN: ${{ inputs.plan }}
+        run: |
+          set -euo pipefail
+          version=$(jq -r '.releases[0].app_version' <<<"$PLAN")
+          base="https://github.com/deemson/shed/releases/download/v$version"
+          arm64_sha=$(curl --proto '=https' --tlsv1.2 -LsSf \
+            "$base/shed-aarch64-apple-darwin.tar.gz.sha256" | awk '{print $1}')
+          x86_64_sha=$(curl --proto '=https' --tlsv1.2 -LsSf \
+            "$base/shed-x86_64-apple-darwin.tar.gz.sha256" | awk '{print $1}')
+          scripts/release/render-homebrew-formula.sh \
+            "$version" "$arm64_sha" "$x86_64_sha" shed.rb
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: homebrew-formula
+          path: shed.rb
+          retention-days: 7
+
+  homebrew-test:
+    name: Test Homebrew (${{ matrix.arch }})
+    needs: formula
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-26
+          - arch: x86_64
+            runner: macos-26-intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: homebrew-formula
+          path: formula
+      - name: Install and test formula
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew uninstall --force shed >/dev/null 2>&1 || true
+          brew install --formula "$PWD/formula/shed.rb"
+          brew test shed
+          shed --version
+
+  cache:
+    name: Publish Cachix closures
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: nix-closure-*
+          path: closures
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+      - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
+        with:
+          name: deemson-shed
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: Import, publish, pin, and read back closures
+        shell: bash
+        env:
+          PLAN: ${{ inputs.plan }}
+        run: |
+          set -euo pipefail
+          version=$(jq -r '.releases[0].app_version' <<<"$PLAN")
+
+          for system in aarch64-linux x86_64-linux; do
+            dir="closures/nix-closure-$system"
+            test -s "$dir/closure.nar.gz"
+            test -s "$dir/output-path"
+            gzip -dc "$dir/closure.nar.gz" | nix-store --import >/dev/null
+            output=$(cat "$dir/output-path")
+            test -x "$output/bin/shed"
+            # The aarch64 closure cannot execute on this x86_64 publishing runner;
+            # both closures were already smoke-tested on native runners.
+            cachix push deemson-shed "$output"
+            cachix pin deemson-shed "shed-v$version-$system" "$output"
+
+            store_name=${output#/nix/store/}
+            hash=${store_name%%-*}
+            for attempt in {1..12}; do
+              if curl --proto '=https' --tlsv1.2 -fsS \
+                "https://deemson-shed.cachix.org/$hash.narinfo" >/dev/null; then
+                break
+              fi
+              if [[ $attempt == 12 ]]; then
+                echo "Cachix did not serve $output after publication" >&2
+                exit 1
+              fi
+              sleep 5
+            done
+          done
+
+  finish:
+    name: Publish Homebrew and release notes
+    needs: [formula, homebrew-test, cache]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: homebrew-formula
+          path: formula
+      - name: Update Homebrew tap
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          PLAN: ${{ inputs.plan }}
+        run: |
+          set -euo pipefail
+          version=$(jq -r '.releases[0].app_version' <<<"$PLAN")
+          content=$(base64 -w 0 formula/shed.rb)
+          endpoint="repos/deemson/homebrew-tap/contents/Formula/shed.rb"
+          existing=$(gh api "$endpoint" 2>/dev/null || true)
+          existing_sha=$(jq -r '.sha // empty' <<<"$existing")
+          existing_content=$(jq -r '.content // empty' <<<"$existing" | tr -d '\n')
+
+          if [[ "$content" == "$existing_content" ]]; then
+            echo "Formula/shed.rb is already current"
+            exit 0
+          fi
+
+          args=(--method PUT -f message="chore: update shed formula to v$version" -f content="$content")
+          if [[ -n "$existing_sha" ]]; then
+            args+=(-f sha="$existing_sha")
+          fi
+          gh api "$endpoint" "${args[@]}" >/dev/null
+      - name: Append GitHub-generated release notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLAN: ${{ inputs.plan }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          generated=$(mktemp)
+          current=$(mktemp)
+          combined=$(mktemp)
+
+          gh api --method POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+            -f tag_name="$TAG" -f target_commitish="$GITHUB_SHA" \
+            --jq .body >"$generated"
+          gh release view "$TAG" --json body --jq .body >"$current"
+
+          python3 - "$current" "$generated" "$combined" <<'PY'
+          import pathlib
+          import sys
+
+          start = "<!-- shed:generated-notes:start -->"
+          end = "<!-- shed:generated-notes:end -->"
+          current = pathlib.Path(sys.argv[1]).read_text()
+          generated = pathlib.Path(sys.argv[2]).read_text().strip()
+
+          if start in current and end in current:
+              before, rest = current.split(start, 1)
+              _, after = rest.split(end, 1)
+              current = (before.rstrip() + "\n" + after.lstrip()).strip()
+
+          body = f"{current}\n\n{start}\n## Changes\n\n{generated}\n{end}\n"
+          pathlib.Path(sys.argv[3]).write_text(body)
+          PY
+
+          gh release edit "$TAG" --notes-file "$combined"

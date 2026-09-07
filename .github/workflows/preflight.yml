@@ -1,0 +1,59 @@
+name: Release preflight
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Release preflight
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify generated release workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            https://github.com/axodotdev/cargo-dist/releases/download/v0.32.0/cargo-dist-installer.sh | sh
+          dist generate --check
+      - name: Validate release tag
+        if: github.ref_type == 'tag'
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "release tags must have the exact form vX.Y.Z" >&2
+            exit 1
+          fi
+
+          if [[ "$(git cat-file -t "refs/tags/$TAG")" != tag ]]; then
+            echo "$TAG must be an annotated tag" >&2
+            exit 1
+          fi
+
+          commit=$(git rev-list -n 1 "$TAG")
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$commit" origin/main; then
+            echo "$TAG does not point to a commit in main's history" >&2
+            exit 1
+          fi
+
+          cargo_version=$(python3 - <<'PY'
+          import tomllib
+          with open("Cargo.toml", "rb") as cargo_toml:
+              print(tomllib.load(cargo_toml)["package"]["version"])
+          PY
+          )
+          if [[ "$TAG" != "v$cargo_version" ]]; then
+            echo "$TAG does not match Cargo.toml version $cargo_version" >&2
+            exit 1
+          fi
