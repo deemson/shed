@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 #[derive(Parser)]
 #[command(
     name = "shed",
-    version,
+    version = env!("SHED_VERSION"),
     about = "Sync dotfiles between system and shed"
 )]
 pub struct Cli {
