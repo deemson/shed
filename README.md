@@ -198,7 +198,9 @@ Both sync commands require `--collection`.
 - `-v, --verbose` prints each copy operation.
 - `--no-progress` disables the interactive progress display.
 - `-h, --help` prints command help.
-- `-V, --version` prints the installed version.
+- `-V, --version` prints the release version. Development builds also include
+  the commits since the latest tag, the Git commit, and a `dirty` suffix when
+  the working tree has changes.
 
 Run `shed --help` or `shed <COMMAND> --help` for generated command help.
 
