@@ -171,7 +171,7 @@ jobs:
           gh api --method POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
             -f tag_name="$TAG" -f target_commitish="$GITHUB_SHA" \
             --jq .body >"$generated"
-          gh release view "$TAG" --json body --jq .body >"$current"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body >"$current"
 
           python3 - "$current" "$generated" "$combined" <<'PY'
           import pathlib
@@ -191,4 +191,4 @@ jobs:
           pathlib.Path(sys.argv[3]).write_text(body)
           PY
 
-          gh release edit "$TAG" --notes-file "$combined"
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$combined"
