@@ -10,17 +10,14 @@ pub enum Error {
     #[error("failed to parse {0}: {1}")]
     Yaml(PathBuf, #[source] yaml_serde::Error),
 
-    #[error("inheritance cycle detected: {0}")]
-    InheritanceCycle(String),
+    #[error("invalid manifest {0}: {1}")]
+    InvalidManifest(PathBuf, String),
 
-    #[error("cannot run abstract collection directly: {0:?}")]
-    AbstractCollection(PathBuf),
-
-    #[error("items not found: {0:?}")]
-    ItemNotFound(PathBuf),
+    #[error("include cycle detected: {0}")]
+    IncludeCycle(String),
 
     #[error("{0}")]
-    MissingArg(String),
+    InvalidConfig(String),
 
     #[error("failed to install Ctrl-C handler: {0}")]
     CtrlC(#[source] ctrlc::Error),

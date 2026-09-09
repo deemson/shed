@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io::{self, IsTerminal, Stderr};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -8,6 +9,9 @@ use ratatui::style::{Color, Style};
 use ratatui::widgets::{LineGauge, Paragraph, Widget, Wrap};
 use ratatui::{Frame, Terminal, TerminalOptions, Viewport};
 
+use crate::manifest::ReportLayout;
+#[cfg(test)]
+use crate::manifest::{ReportNode, ReportSection};
 use crate::sync::{Direction, ItemStatus, Summary};
 
 #[derive(Clone, Copy)]
@@ -159,12 +163,11 @@ pub trait Reporter {
 
 pub fn reporter(
     direction: Direction,
-    names: &[&str],
+    layout: &ReportLayout,
     dry: bool,
     verbose: bool,
     no_progress: bool,
 ) -> Box<dyn Reporter> {
-    let names: Vec<String> = names.iter().map(|name| (*name).to_string()).collect();
     let detailed = dry || verbose;
     // Crossterm's cursor-position query is issued through stdout even when the
     // Ratatui backend writes to stderr. Requiring both streams to be terminals
@@ -176,7 +179,7 @@ pub fn reporter(
         io::stderr().is_terminal(),
         io::stdout().is_terminal(),
     );
-    let plain = PlainReporter::new(names.clone(), detailed);
+    let plain = PlainReporter::new(layout.clone(), detailed);
 
     if !wants_inline {
         return Box::new(plain);
@@ -195,7 +198,7 @@ pub fn reporter(
         return Box::new(plain);
     }
 
-    match InlineReporter::new(direction, names, width, height) {
+    match InlineReporter::new(direction, layout.clone(), width, height) {
         Ok(inline) => Box::new(FallbackReporter {
             inline: Some(inline),
             plain,
@@ -219,16 +222,18 @@ fn should_use_inline(
 }
 
 struct PlainReporter {
-    names: Vec<String>,
+    layout: ReportLayout,
+    printed_sections: HashSet<usize>,
     detailed: bool,
     print_final_report: bool,
     unicode_report: bool,
 }
 
 impl PlainReporter {
-    fn new(names: Vec<String>, detailed: bool) -> Self {
+    fn new(layout: ReportLayout, detailed: bool) -> Self {
         Self {
-            names,
+            layout,
+            printed_sections: HashSet::new(),
             detailed,
             print_final_report: false,
             unicode_report: false,
@@ -236,12 +241,36 @@ impl PlainReporter {
     }
 }
 
+fn section_containing(layout: &ReportLayout, wanted: usize) -> Option<usize> {
+    layout.sections.iter().position(|section| {
+        section
+            .roots
+            .iter()
+            .any(|root| node_contains(layout, *root, wanted))
+    })
+}
+
+fn node_contains(layout: &ReportLayout, node: usize, wanted: usize) -> bool {
+    node == wanted
+        || layout.nodes[node]
+            .children
+            .iter()
+            .any(|child| node_contains(layout, *child, wanted))
+}
+
 impl Reporter for PlainReporter {
     fn report(&mut self, event: Event<'_>) {
         match event {
             Event::ItemStarted { item } if self.detailed => {
-                if let Some(name) = self.names.get(item) {
-                    println!("syncing: {name}");
+                if let Some(owner) = self.layout.leaf_owners.get(item).copied()
+                    && let Some(section) = section_containing(&self.layout, owner)
+                    && self.printed_sections.insert(section)
+                    && let Some(heading) = &self.layout.sections[section].heading
+                {
+                    println!("{heading}");
+                }
+                if let Some((name, depth)) = self.layout.leaf_label(item) {
+                    println!("{}syncing: {name}", "  ".repeat(depth));
                 }
             }
             Event::FileStarted { src, dst, .. } if self.detailed => {
@@ -300,11 +329,12 @@ struct InlineReporter {
 impl InlineReporter {
     fn new(
         direction: Direction,
-        names: Vec<String>,
+        layout: ReportLayout,
         width: u16,
         terminal_height: u16,
     ) -> io::Result<Self> {
-        let desired_height = 1 + names.len().min(10) as u16;
+        let row_count = report_row_count(&layout);
+        let desired_height = 1 + row_count.min(10) as u16;
         let viewport_height = desired_height.max(2).min(terminal_height);
         let backend = CrosstermBackend::new(io::stderr());
         let terminal = Terminal::with_options(
@@ -316,7 +346,7 @@ impl InlineReporter {
         let color = std::env::var_os("NO_COLOR").is_none_or(|value| value.is_empty());
         let mut reporter = Self {
             terminal,
-            state: ViewState::new(direction, names),
+            state: ViewState::with_layout(direction, layout),
             color,
             last_draw: Instant::now() - Duration::from_secs(1),
             finished: false,
@@ -490,15 +520,14 @@ impl InlineReporter {
         }
         self.draw(true)?;
 
-        let item_lines: Vec<_> = self
-            .state
-            .items
-            .iter()
-            .map(|item| {
-                (
-                    format_item_report(item, self.width),
-                    status_style(item.status, self.color),
-                )
+        let item_lines: Vec<_> = report_rows(&self.state)
+            .into_iter()
+            .map(|row| match row {
+                RenderRow::Heading(heading) => (heading, active_style(self.color)),
+                RenderRow::Item { view, .. } => (
+                    format_item_report(&view, self.width),
+                    status_style(view.status, self.color),
+                ),
             })
             .collect();
         let summary_text = format_summary(summary, true);
@@ -567,6 +596,7 @@ impl Drop for InlineReporter {
 #[derive(Clone, Debug)]
 struct ViewState {
     direction: Direction,
+    layout: ReportLayout,
     items: Vec<ItemView>,
     current: Option<usize>,
     spinner: usize,
@@ -580,16 +610,45 @@ struct ViewState {
 }
 
 impl ViewState {
+    #[cfg(test)]
     fn new(direction: Direction, names: Vec<String>) -> Self {
-        let name_width = names
+        let mut layout = ReportLayout::default();
+        let mut roots = Vec::new();
+        for (leaf, name) in names.into_iter().enumerate() {
+            let node = layout.nodes.len();
+            layout.nodes.push(ReportNode {
+                origin: name.clone(),
+                label: name,
+                depth: 0,
+                children: Vec::new(),
+                leaf: Some(leaf),
+                duplicate_of: None,
+            });
+            layout.leaf_owners.push(node);
+            roots.push(node);
+        }
+        layout.sections.push(ReportSection {
+            heading: None,
+            roots,
+        });
+        Self::with_layout(direction, layout)
+    }
+
+    fn with_layout(direction: Direction, layout: ReportLayout) -> Self {
+        let item_count = layout.leaf_owners.len();
+        let name_width = layout
+            .nodes
             .iter()
-            .map(|name| name.chars().count())
+            .map(|node| node.label.chars().count() + node.depth * 2)
             .max()
             .unwrap_or(10)
-            .clamp(10, 22) as u16;
+            .clamp(10, 30) as u16;
         Self {
             direction,
-            items: names.into_iter().map(ItemView::new).collect(),
+            layout,
+            items: (0..item_count)
+                .map(|index| ItemView::new(format!("item-{index}")))
+                .collect(),
             current: None,
             spinner: 0,
             scanned_items: 0,
@@ -614,6 +673,10 @@ struct ItemView {
     current_path: String,
     had_warning: bool,
     had_error: bool,
+    total_items: usize,
+    completed_items: usize,
+    branch: bool,
+    duplicate: bool,
 }
 
 impl ItemView {
@@ -628,8 +691,146 @@ impl ItemView {
             current_path: String::new(),
             had_warning: false,
             had_error: false,
+            total_items: 0,
+            completed_items: 0,
+            branch: false,
+            duplicate: false,
         }
     }
+}
+
+#[derive(Clone, Debug)]
+enum RenderRow {
+    Heading(String),
+    Item { node: usize, view: ItemView },
+}
+
+fn report_row_count(layout: &ReportLayout) -> usize {
+    layout
+        .sections
+        .iter()
+        .map(|section| {
+            usize::from(section.heading.is_some())
+                + section
+                    .roots
+                    .iter()
+                    .map(|root| node_count(layout, *root))
+                    .sum::<usize>()
+        })
+        .sum()
+}
+
+fn node_count(layout: &ReportLayout, node: usize) -> usize {
+    1 + layout.nodes[node]
+        .children
+        .iter()
+        .map(|child| node_count(layout, *child))
+        .sum::<usize>()
+}
+
+fn report_rows(state: &ViewState) -> Vec<RenderRow> {
+    let mut rows = Vec::new();
+    for section in &state.layout.sections {
+        if let Some(heading) = &section.heading {
+            rows.push(RenderRow::Heading(heading.clone()));
+        }
+        for root in &section.roots {
+            push_node_rows(state, *root, &mut rows);
+        }
+    }
+    rows
+}
+
+fn push_node_rows(state: &ViewState, node: usize, rows: &mut Vec<RenderRow>) {
+    rows.push(RenderRow::Item {
+        node,
+        view: node_view(state, node),
+    });
+    for child in &state.layout.nodes[node].children {
+        push_node_rows(state, *child, rows);
+    }
+}
+
+fn node_view(state: &ViewState, node_index: usize) -> ItemView {
+    let node = &state.layout.nodes[node_index];
+    let indent = "  ".repeat(node.depth);
+    if let Some(leaf) = node.leaf {
+        let mut view = state
+            .items
+            .get(leaf)
+            .cloned()
+            .unwrap_or_else(|| ItemView::new(node.label.clone()));
+        view.name = if let Some(owner) = node.duplicate_of {
+            view.total_files = 0;
+            view.processed_files = 0;
+            view.copied_files = 0;
+            view.copied_bytes = 0;
+            view.duplicate = true;
+            format!(
+                "{indent}{}  duplicate → {}",
+                node.label, state.layout.nodes[owner].origin
+            )
+        } else {
+            format!("{indent}{}", node.label)
+        };
+        return view;
+    }
+
+    let children: Vec<ItemView> = node
+        .children
+        .iter()
+        .map(|child| node_view(state, *child))
+        .collect();
+    let mut view = ItemView::new(format!("{indent}{}", node.label));
+    view.branch = true;
+    view.status = aggregate_status(&children);
+    for child in &children {
+        if child.duplicate {
+            continue;
+        }
+        view.total_items += 1 + child.total_items;
+        view.completed_items += usize::from(is_terminal(child.status)) + child.completed_items;
+        view.total_files += child.total_files;
+        view.processed_files += child.processed_files;
+        view.copied_files += child.copied_files;
+        view.copied_bytes += child.copied_bytes;
+        view.had_warning |= child.had_warning;
+        view.had_error |= child.had_error;
+        if view.current_path.is_empty() && !child.current_path.is_empty() {
+            view.current_path = child.current_path.clone();
+        }
+    }
+    view
+}
+
+fn aggregate_status(children: &[ItemView]) -> ItemStatus {
+    for status in [
+        ItemStatus::Scanning,
+        ItemStatus::Copying,
+        ItemStatus::Pending,
+        ItemStatus::Ready,
+        ItemStatus::Failed,
+        ItemStatus::Warning,
+        ItemStatus::Skipped,
+        ItemStatus::Cancelled,
+        ItemStatus::Done,
+    ] {
+        if children.iter().any(|child| child.status == status) {
+            return status;
+        }
+    }
+    ItemStatus::Done
+}
+
+fn is_terminal(status: ItemStatus) -> bool {
+    matches!(
+        status,
+        ItemStatus::Done
+            | ItemStatus::Warning
+            | ItemStatus::Skipped
+            | ItemStatus::Failed
+            | ItemStatus::Cancelled
+    )
 }
 
 fn render_progress(frame: &mut Frame<'_>, state: &ViewState, color: bool) {
@@ -638,29 +839,38 @@ fn render_progress(frame: &mut Frame<'_>, state: &ViewState, color: bool) {
         return;
     }
 
+    let rows = report_rows(state);
     let visible_rows = usize::from(area.height.saturating_sub(1)).min(10);
     render_overall(
         frame,
         Rect::new(area.x, area.y, area.width, 1),
         state,
-        visible_rows,
+        visible_rows.min(rows.len()),
         color,
     );
 
-    if visible_rows == 0 || state.items.is_empty() {
+    if visible_rows == 0 || rows.is_empty() {
         return;
     }
-    let (start, end) = visible_window(state.items.len(), visible_rows, state.current);
-    for (row, item_index) in (start..end).enumerate() {
+    let current = state.current.and_then(|leaf| {
+        let owner = *state.layout.leaf_owners.get(leaf)?;
+        rows.iter()
+            .position(|row| matches!(row, RenderRow::Item { node, .. } if *node == owner))
+    });
+    let (start, end) = visible_window(rows.len(), visible_rows, current);
+    for (row, rendered) in rows[start..end].iter().enumerate() {
         let rect = Rect::new(area.x, area.y.saturating_add(1 + row as u16), area.width, 1);
-        render_item(
-            frame,
-            rect,
-            &state.items[item_index],
-            state.name_width,
-            state.spinner,
-            color,
-        );
+        match rendered {
+            RenderRow::Heading(heading) => {
+                frame.render_widget(
+                    Paragraph::new(heading.as_str()).style(active_style(color)),
+                    rect,
+                );
+            }
+            RenderRow::Item { view, .. } => {
+                render_item(frame, rect, view, state.name_width, state.spinner, color)
+            }
+        }
     }
 }
 
@@ -671,7 +881,7 @@ fn render_overall(
     visible_rows: usize,
     color: bool,
 ) {
-    let hidden = state.items.len().saturating_sub(visible_rows);
+    let hidden = report_row_count(&state.layout).saturating_sub(visible_rows);
     if !state.plan_complete {
         let spinner = spinner(state.spinner);
         let suffix = if hidden > 0 {
@@ -740,7 +950,16 @@ fn render_item(
     color: bool,
 ) {
     let symbol = status_symbol(item.status, spinner_index);
-    let count = format!("{}/{}", item.copied_files, item.total_files);
+    let count = if item.branch {
+        format!(
+            "{}/{} items · {}/{} files",
+            item.completed_items, item.total_items, item.copied_files, item.total_files
+        )
+    } else if item.duplicate {
+        "duplicate".to_string()
+    } else {
+        format!("{}/{}", item.copied_files, item.total_files)
+    };
     let status = item.status.label();
     let style = status_style(item.status, color);
 
@@ -761,7 +980,7 @@ fn render_item(
         Constraint::Length(2),
         Constraint::Length(name_width),
         Constraint::Min(8),
-        Constraint::Length(8),
+        Constraint::Length(u16::try_from(count.len()).unwrap_or(u16::MAX).max(8)),
     ];
     if show_bytes {
         constraints.push(Constraint::Length(10));
@@ -892,7 +1111,19 @@ fn summary_style(summary: &Summary, color: bool) -> Style {
 
 fn format_item_report(item: &ItemView, width: u16) -> String {
     let symbol = status_symbol(item.status, 0);
-    let suffix = if width >= 55 {
+    let suffix = if item.duplicate {
+        format!("  {}", item.status.label())
+    } else if item.branch {
+        format!(
+            "  {}/{} items  {}/{} files  {}  {}",
+            item.completed_items,
+            item.total_items,
+            item.copied_files,
+            item.total_files,
+            format_bytes(item.copied_bytes),
+            item.status.label()
+        )
+    } else if width >= 55 {
         format!(
             "  {}/{} files  {}  {}",
             item.copied_files,
@@ -1162,6 +1393,103 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect();
         assert!(rendered.contains("7 hidden"));
+    }
+
+    #[test]
+    fn aggregates_authored_tree_rows() {
+        let layout = ReportLayout {
+            sections: vec![ReportSection {
+                heading: Some("nested.yaml".into()),
+                roots: vec![0],
+            }],
+            nodes: vec![
+                ReportNode {
+                    label: "$HOME/.config/app → stored/app".into(),
+                    origin: "nested.yaml:$HOME/.config/app".into(),
+                    depth: 0,
+                    children: vec![1, 2],
+                    leaf: None,
+                    duplicate_of: None,
+                },
+                ReportNode {
+                    label: "one".into(),
+                    origin: "nested.yaml:one".into(),
+                    depth: 1,
+                    children: vec![],
+                    leaf: Some(0),
+                    duplicate_of: None,
+                },
+                ReportNode {
+                    label: "two".into(),
+                    origin: "nested.yaml:two".into(),
+                    depth: 1,
+                    children: vec![],
+                    leaf: Some(1),
+                    duplicate_of: None,
+                },
+            ],
+            leaf_owners: vec![1, 2],
+        };
+        let mut state = ViewState::with_layout(Direction::Put, layout);
+        state.items[0].status = ItemStatus::Done;
+        state.items[0].total_files = 2;
+        state.items[0].copied_files = 2;
+        state.items[1].status = ItemStatus::Warning;
+        state.items[1].total_files = 1;
+
+        let rows = report_rows(&state);
+        assert_eq!(rows.len(), 4);
+        let RenderRow::Item { view, .. } = &rows[1] else {
+            panic!("expected branch row");
+        };
+        assert!(view.branch);
+        assert_eq!(view.total_items, 2);
+        assert_eq!(view.completed_items, 2);
+        assert_eq!(view.total_files, 3);
+        assert_eq!(view.copied_files, 2);
+        assert_eq!(view.status, ItemStatus::Warning);
+    }
+
+    #[test]
+    fn duplicate_rows_share_status_without_metrics() {
+        let layout = ReportLayout {
+            sections: vec![ReportSection {
+                heading: Some("duplicates.yaml".into()),
+                roots: vec![0, 1],
+            }],
+            nodes: vec![
+                ReportNode {
+                    label: "first".into(),
+                    origin: "duplicates.yaml:first".into(),
+                    depth: 0,
+                    children: vec![],
+                    leaf: Some(0),
+                    duplicate_of: None,
+                },
+                ReportNode {
+                    label: "second".into(),
+                    origin: "duplicates.yaml:second".into(),
+                    depth: 0,
+                    children: vec![],
+                    leaf: Some(0),
+                    duplicate_of: Some(0),
+                },
+            ],
+            leaf_owners: vec![0],
+        };
+        let mut state = ViewState::with_layout(Direction::Put, layout);
+        state.items[0].status = ItemStatus::Done;
+        state.items[0].total_files = 3;
+        state.items[0].copied_files = 3;
+
+        let rows = report_rows(&state);
+        let RenderRow::Item { view, .. } = &rows[2] else {
+            panic!("expected duplicate row");
+        };
+        assert!(view.duplicate);
+        assert_eq!(view.status, ItemStatus::Done);
+        assert_eq!(view.total_files, 0);
+        assert!(view.name.contains("duplicate → duplicates.yaml:first"));
     }
 
     #[test]

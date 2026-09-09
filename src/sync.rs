@@ -10,7 +10,7 @@ use futures::stream::{self, FuturesUnordered};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::item::ResolvedItem;
+use crate::manifest::{ReportLayout, ResolvedEntry, ResolvedItem};
 #[cfg(test)]
 use crate::progress::Event;
 use crate::progress::{self, OwnedEvent, Reporter};
@@ -218,6 +218,7 @@ struct CopyResult {
     error: bool,
 }
 
+#[cfg(test)]
 pub async fn execute(
     items: &[ResolvedItem],
     direction: Direction,
@@ -226,9 +227,30 @@ pub async fn execute(
     no_progress: bool,
     cancellation: &Cancellation,
 ) -> Result<Outcome, crate::error::Error> {
+    let layout = ReportLayout::flat(items);
+    execute_with_layout(
+        items,
+        &layout,
+        direction,
+        dry,
+        verbose,
+        no_progress,
+        cancellation,
+    )
+    .await
+}
+
+pub async fn execute_with_layout(
+    items: &[ResolvedItem],
+    layout: &ReportLayout,
+    direction: Direction,
+    dry: bool,
+    verbose: bool,
+    no_progress: bool,
+    cancellation: &Cancellation,
+) -> Result<Outcome, crate::error::Error> {
     let started = Instant::now();
-    let names: Vec<&str> = items.iter().map(|item| item.name.as_str()).collect();
-    let mut reporter = progress::reporter(direction, &names, dry, verbose, no_progress);
+    let mut reporter = progress::reporter(direction, layout, dry, verbose, no_progress);
     Ok(execute_with_reporter(
         items,
         direction,
@@ -826,7 +848,7 @@ fn final_status(plan: &ItemPlan, had_error: bool) -> ItemStatus {
     }
 }
 
-fn endpoints(entry: &crate::item::ResolvedEntry, direction: Direction) -> (&Path, &Path) {
+fn endpoints(entry: &ResolvedEntry, direction: Direction) -> (&Path, &Path) {
     match direction {
         Direction::Put => (&entry.system, &entry.shed),
         Direction::Get => (&entry.shed, &entry.system),
@@ -908,7 +930,6 @@ fn outcome_from(summary: &Summary) -> Outcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::item::ResolvedEntry;
     use tempfile::TempDir;
 
     fn resolved_item(
@@ -1068,27 +1089,6 @@ mod tests {
 
         assert_eq!(outcome.exit_code(), ExitCode::SUCCESS);
         assert!(!destination.exists());
-    }
-
-    #[tokio::test]
-    async fn later_entries_keep_last_writer_wins_behavior() {
-        let temp = TempDir::new().unwrap();
-        let first = temp.path().join("first.txt");
-        let second = temp.path().join("second.txt");
-        fs::write(&first, "first").unwrap();
-        fs::write(&second, "second").unwrap();
-        let shed_base = temp.path().join("shed/item");
-        let destination = shed_base.join("same.txt");
-        let item = resolved_item(
-            "item",
-            shed_base,
-            vec![(first, destination.clone()), (second, destination.clone())],
-        );
-
-        let outcome = run(&[item], Direction::Put, false).await;
-
-        assert_eq!(outcome.exit_code(), ExitCode::SUCCESS);
-        assert_eq!(fs::read_to_string(destination).unwrap(), "second");
     }
 
     #[tokio::test]

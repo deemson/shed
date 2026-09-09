@@ -37,7 +37,7 @@ curl --proto '=https' --tlsv1.2 -LsSf \
   | sh
 dist generate
 dist generate --check
-dist plan --tag=v0.1.0
+dist plan --tag=v0.2.0
 ```
 
 Do not hand-edit `.github/workflows/release.yml`. Custom behavior belongs in
