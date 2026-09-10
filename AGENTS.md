@@ -1,5 +1,9 @@
 # Shed Development Guidelines
 
+## Refactor Context
+
+Before assisting with this repository, read [`REFACTORING.md`](./REFACTORING.md). It explains the purpose of this branch, where to find the `0.2.0` reference implementation, and the guidance-first collaboration approach requested by the repository owner.
+
 ## Commit Messages
 
 Follow [Conventional Commits](https://www.conventionalcommits.org/):
