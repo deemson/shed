@@ -47,6 +47,22 @@ pub struct Item {
     pub items: Option<Vec<ChildItem>>,
 }
 
+impl TryFrom<&str> for ManifestFile {
+    type Error = yaml_serde::Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        yaml_serde::from_str(value)
+    }
+}
+
+impl TryFrom<String> for ManifestFile {
+    type Error = yaml_serde::Error;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        ManifestFile::try_from(value.as_str())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -68,7 +84,7 @@ mod tests {
             "      - path: item2-object-item-path",
             "        shed: item2-object-item-shed",
         ].join("\n");
-        let actual = yaml_serde::from_str::<ManifestFile>(&s).unwrap();
+        let actual = ManifestFile::try_from(s).unwrap();
         let expected = ManifestFile {
             include: ["manifest1", "manifest2"].map(String::from).into(),
             items: vec![
@@ -97,7 +113,7 @@ mod tests {
 
     #[test]
     fn rejects_non_object_manifest() {
-        let res = yaml_serde::from_str::<ManifestFile>("bad");
+        let res = ManifestFile::try_from("bad");
         let error = res.expect_err("must error");
 
         assert_eq!(
@@ -112,7 +128,7 @@ mod tests {
         let s = [
             "bad: value",
         ].join("\n");
-        let res = yaml_serde::from_str::<ManifestFile>(&s);
+        let res = ManifestFile::try_from(s);
         let error = res.expect_err("must error");
 
         assert_eq!(
