@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::manifest_yaml::{ChildItem, ManifestFile, RootItem};
+use crate::manifest::{ChildItem, ManifestFile, RootItem};
 
 #[derive(Debug, PartialEq)]
 pub struct Dir {

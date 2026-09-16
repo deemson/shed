@@ -89,4 +89,20 @@ mod tests {
             "unknown field `bad`, expected `include` or `items`"
         );
     }
+
+    #[test]
+    fn accepts_empty_manifest() {
+        #[rustfmt::skip]
+        let s = [
+            "{}",
+        ].join("\n");
+
+        let actual = ManifestFile::try_from(s).unwrap();
+        let expected = ManifestFile {
+            include: vec![],
+            items: vec![],
+        };
+
+        assert_eq!(actual, expected);
+    }
 }

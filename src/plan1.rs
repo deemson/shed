@@ -1,7 +1,7 @@
 #![allow(dead_code, unused_variables)]
 use std::path::PathBuf;
 
-use crate::manifest_yaml::ManifestFile;
+use crate::manifest::ManifestFile;
 
 #[derive(Debug, PartialEq)]
 pub struct Dir {
