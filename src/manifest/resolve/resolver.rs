@@ -367,14 +367,19 @@ mod tests {
 
         let expected = vec![Manifest {
             name: String::from("m1"),
-            path: m1_path,
+            path: m1_path.clone(),
             manifests: vec![Manifest {
                 name: String::from("m2"),
                 path: m2_path,
                 manifests: vec![Manifest {
                     name: String::from("m3"),
                     path: m3_path,
-                    manifests: Vec::new(),
+                    manifests: vec![Manifest {
+                        name: String::from("m1"),
+                        path: m1_path,
+                        manifests: Vec::new(),
+                        items: Vec::new(),
+                    }],
                     items: Vec::new(),
                 }],
                 items: Vec::new(),
