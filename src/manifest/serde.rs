@@ -11,7 +11,7 @@ pub struct ManifestFile {
 }
 
 #[derive(Debug, Deserialize, JsonSchema, PartialEq)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, expecting = "an object")]
 pub struct RootItem {
     pub path: String,
     pub shed: String,

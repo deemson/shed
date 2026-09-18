@@ -6,6 +6,7 @@ use std::{
 use futures::future::join_all;
 use tokio::sync::mpsc;
 
+use super::error::Error;
 use super::event::Event;
 use super::manifest::Manifest;
 use crate::manifest::ManifestFile;
@@ -31,57 +32,74 @@ pub struct Resolver {
 
 impl Resolver {
     pub async fn resolve(&self, inputs: impl IntoIterator<Item = Input>) -> Vec<Manifest> {
-        let manifests = self.resolve_manifest_files(Vec::new(), inputs).await;
+        let manifests = self
+            .resolve_manifest_files(Vec::new(), Vec::new(), inputs)
+            .await;
         self.send_event(Event::Done).await;
         manifests
     }
 
     async fn resolve_manifest_files(
         &self,
-        active: Vec<Input>,
+        input_stack: Vec<Input>,
+        index: Vec<usize>,
         inputs: impl IntoIterator<Item = Input>,
     ) -> Vec<Manifest> {
-        join_all(
-            inputs
-                .into_iter()
-                .map(|input| self.resolve_manifest_file(active.clone(), input)),
-        )
+        join_all(inputs.into_iter().enumerate().map(|(position, input)| {
+            let mut child_index = index.clone();
+            child_index.push(position);
+            self.resolve_manifest_file(input_stack.clone(), child_index, input)
+        }))
         .await
     }
 
-    async fn resolve_manifest_file(&self, active: Vec<Input>, input: Input) -> Manifest {
-        self.send_event(Event::Started).await;
+    async fn resolve_manifest_file(
+        &self,
+        input_stack: Vec<Input>,
+        index: Vec<usize>,
+        input: Input,
+    ) -> Manifest {
+        self.send_event(Event::Started {
+            index: index.clone(),
+        })
+        .await;
 
         let content = match tokio::fs::read_to_string(&input.path).await {
             Ok(content) => content,
             Err(source) => {
-                let _ = source;
-                return self.error_resolution(input).await;
+                return self
+                    .error_resolution(index, input, Error::Io { source })
+                    .await;
             }
         };
 
         let manifest_file = match ManifestFile::try_from(content) {
             Ok(manifest_file) => manifest_file,
             Err(source) => {
-                let _ = source;
-                return self.error_resolution(input).await;
+                return self
+                    .error_resolution(index, input, Error::Yaml { source })
+                    .await;
             }
         };
 
-        let mut active = active;
-        active.push(input.clone());
+        let mut input_stack = input_stack;
+        input_stack.push(input.clone());
 
-        let manifests = join_all(manifest_file.include.into_iter().map(|name| {
-            let active = active.clone();
-            let path = &input.path;
-            async move {
-                self.resolve_manifest_file_include(active, path, &name)
-                    .await
-            }
-        }))
+        let manifests = join_all(manifest_file.include.into_iter().enumerate().map(
+            |(position, name)| {
+                let active = input_stack.clone();
+                let path = &input.path;
+                let mut child_index = index.clone();
+                child_index.push(position);
+                async move {
+                    self.resolve_manifest_file_include(active, child_index, path, &name)
+                        .await
+                }
+            },
+        ))
         .await;
 
-        self.send_event(Event::Resolved).await;
+        self.send_event(Event::Resolved { index }).await;
         Manifest {
             name: input.name,
             path: input.path,
@@ -92,7 +110,8 @@ impl Resolver {
 
     async fn resolve_manifest_file_include(
         &self,
-        active: Vec<Input>,
+        input_stack: Vec<Input>,
+        index: Vec<usize>,
         path: &Path,
         name: &str,
     ) -> Manifest {
@@ -111,36 +130,47 @@ impl Resolver {
                     Ok(path) => path,
                     Err(error) if error.kind() == io::ErrorKind::NotFound => {
                         return self
-                            .error_resolution(Input {
-                                name: name.into(),
-                                path: yml,
-                            })
+                            .error_resolution(
+                                index,
+                                Input {
+                                    name: name.into(),
+                                    path: yml,
+                                },
+                                Error::NotFound,
+                            )
                             .await;
                     }
                     Err(source) => {
-                        let _ = source;
                         return self
-                            .error_resolution(Input {
-                                name: name.into(),
-                                path: yml,
-                            })
+                            .error_resolution(
+                                index,
+                                Input {
+                                    name: name.into(),
+                                    path: yml,
+                                },
+                                Error::Io { source },
+                            )
                             .await;
                     }
                 }
             }
             Err(source) => {
-                let _ = source;
                 return self
-                    .error_resolution(Input {
-                        name: name.into(),
-                        path: yaml,
-                    })
+                    .error_resolution(
+                        index,
+                        Input {
+                            name: name.into(),
+                            path: yaml,
+                        },
+                        Error::Io { source },
+                    )
                     .await;
             }
         };
 
         self.resolve_manifest_file(
-            active,
+            input_stack,
+            index,
             Input {
                 name: name.into(),
                 path,
@@ -149,8 +179,8 @@ impl Resolver {
         .await
     }
 
-    async fn error_resolution(&self, input: Input) -> Manifest {
-        self.send_event(Event::Error).await;
+    async fn error_resolution(&self, index: Vec<usize>, input: Input, error: Error) -> Manifest {
+        self.send_event(Event::Error { index, error }).await;
         Manifest {
             name: input.name,
             path: input.path,
@@ -212,19 +242,23 @@ mod tests {
             "include:",
             "  - child",
             "items:",
-            "  - parent-path"
+            "  - path: parent-path",
+            "    shed: parent-shed"
         ].join("\n");
         write(&parent_path, &parent_content);
+        let parent_path = fs::canonicalize(parent_path).unwrap();
 
         let child_path = temp_dir.path().join("child").with_extension("yaml");
         #[rustfmt::skip]
         let child_content = [
             "items:",
-            "  - child-path"
+            "  - path: child-path",
+            "    shed: child-shed"
         ].join("\n");
         write(&child_path, &child_content);
+        let child_path = fs::canonicalize(child_path).unwrap();
 
-        let (actual, events) = resolve(vec![Input {
+        let (actual, _events) = resolve(vec![Input {
             name: String::from("parent"),
             path: parent_path.clone(),
         }])
@@ -239,19 +273,17 @@ mod tests {
                 manifests: Vec::new(),
                 items: vec![RootItem {
                     path: String::from("child-path"),
-                    shed: String::from("child-path"),
+                    shed: String::from("child-shed"),
                     items: None,
                 }],
             }],
             items: vec![RootItem {
                 path: String::from("parent-path"),
-                shed: String::from("parent-path"),
+                shed: String::from("parent-shed"),
                 items: None,
             }],
         }];
 
-        dbg!(&events);
-        let _ = events;
         assert_eq!(actual, expected)
     }
 }

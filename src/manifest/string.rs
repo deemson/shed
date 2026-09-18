@@ -105,4 +105,20 @@ mod tests {
 
         assert_eq!(actual, expected);
     }
+
+    #[test]
+    fn rejects_bare_string_root_items() {
+        #[rustfmt::skip]
+        let s = [
+            "items:",
+            "  - bare-string",
+        ].join("\n");
+        let res = ManifestFile::try_from(s);
+        let error = res.expect_err("must error");
+
+        assert_eq!(
+            error.to_string(),
+            r#"items[0]: invalid type: string "bare-string", expected an object at line 2 column 5"#
+        );
+    }
 }
