@@ -210,6 +210,28 @@ mod tests {
         fs::write(path, source).unwrap();
     }
 
+    fn assert_contains_started(events: &[Event], expected_index: &[usize]) {
+        assert!(events.iter().any(|event| {
+            matches!(event, Event::Started { index } if index.as_slice() == expected_index)
+        }));
+    }
+
+    fn assert_contains_resolved(events: &[Event], expected_index: &[usize]) {
+        assert!(events.iter().any(|event| {
+            matches!(event, Event::Resolved { index } if index.as_slice() == expected_index)
+        }));
+    }
+
+    fn assert_no_errors(events: &[Event]) {
+        assert!(!events
+            .iter()
+            .any(|event| matches!(event, Event::Error { .. })));
+    }
+
+    fn assert_done_last(events: &[Event]) {
+        assert!(matches!(events.last(), Some(Event::Done)));
+    }
+
     async fn resolve(inputs: impl IntoIterator<Item = Input>) -> (Vec<Manifest>, Vec<Event>) {
         let (sender, mut receiver) = mpsc::channel(1);
         let resolver = Resolver {
@@ -258,7 +280,7 @@ mod tests {
         write(&child_path, &child_content);
         let child_path = fs::canonicalize(child_path).unwrap();
 
-        let (actual, _events) = resolve(vec![Input {
+        let (actual, events) = resolve(vec![Input {
             name: String::from("parent"),
             path: parent_path.clone(),
         }])
@@ -283,6 +305,13 @@ mod tests {
                 items: None,
             }],
         }];
+
+        assert_contains_started(&events, &[0]);
+        assert_contains_started(&events, &[0, 0]);
+        assert_contains_resolved(&events, &[0]);
+        assert_contains_resolved(&events, &[0, 0]);
+        assert_no_errors(&events);
+        assert_done_last(&events);
 
         assert_eq!(actual, expected)
     }
