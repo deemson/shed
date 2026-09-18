@@ -64,6 +64,16 @@ impl Resolver {
         })
         .await;
 
+        if let Some(position) = input_stack
+            .iter()
+            .position(|active_input| active_input.path == input.path)
+        {
+            let start_index = index[..=position].to_vec();
+            return self
+                .error_resolution(index, input, Error::Cycle { start_index })
+                .await;
+        }
+
         let content = match tokio::fs::read_to_string(&input.path).await {
             Ok(content) => content,
             Err(source) => {
@@ -223,9 +233,11 @@ mod tests {
     }
 
     fn assert_no_errors(events: &[Event]) {
-        assert!(!events
-            .iter()
-            .any(|event| matches!(event, Event::Error { .. })));
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, Event::Error { .. }))
+        );
     }
 
     fn assert_done_last(events: &[Event]) {
@@ -311,6 +323,72 @@ mod tests {
         assert_contains_resolved(&events, &[0]);
         assert_contains_resolved(&events, &[0, 0]);
         assert_no_errors(&events);
+        assert_done_last(&events);
+
+        assert_eq!(actual, expected)
+    }
+
+    #[tokio::test]
+    async fn reports_the_start_and_end_of_a_cycle() {
+        let temp_dir = TempDir::new().unwrap();
+
+        let m1_path = temp_dir.path().join("m1").with_extension("yaml");
+        #[rustfmt::skip]
+        let m1_content = [
+            "include:",
+            "  - m2",
+        ].join("\n");
+        write(&m1_path, &m1_content);
+        let m1_path = fs::canonicalize(m1_path).unwrap();
+
+        let m2_path = temp_dir.path().join("m2").with_extension("yaml");
+        #[rustfmt::skip]
+        let m2_content = [
+            "include:",
+            "  - m3",
+        ].join("\n");
+        write(&m2_path, &m2_content);
+        let m2_path = fs::canonicalize(m2_path).unwrap();
+
+        let m3_path = temp_dir.path().join("m3").with_extension("yaml");
+        #[rustfmt::skip]
+        let m3_content = [
+            "include:",
+            "  - m1",
+        ].join("\n");
+        write(&m3_path, &m3_content);
+        let m3_path = fs::canonicalize(m3_path).unwrap();
+
+        let (actual, events) = resolve(vec![Input {
+            name: String::from("m1"),
+            path: m1_path.clone(),
+        }])
+        .await;
+
+        let expected = vec![Manifest {
+            name: String::from("m1"),
+            path: m1_path,
+            manifests: vec![Manifest {
+                name: String::from("m2"),
+                path: m2_path,
+                manifests: vec![Manifest {
+                    name: String::from("m3"),
+                    path: m3_path,
+                    manifests: Vec::new(),
+                    items: Vec::new(),
+                }],
+                items: Vec::new(),
+            }],
+            items: Vec::new(),
+        }];
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Event::Error {
+                index,
+                error: Error::Cycle { start_index },
+            } if index.as_slice() == [0, 0, 0, 0] && start_index.as_slice() == [0]
+        )));
         assert_done_last(&events);
 
         assert_eq!(actual, expected)

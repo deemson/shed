@@ -18,5 +18,5 @@ pub enum Error {
     },
 
     #[error("include cycle detected")]
-    Cycle,
+    Cycle { start_index: Vec<usize> },
 }
