@@ -1,4 +1,4 @@
-use super::serde::ManifestFile;
+use super::model::ManifestFile;
 
 impl TryFrom<&str> for ManifestFile {
     type Error = yaml_serde::Error;
@@ -18,7 +18,7 @@ impl TryFrom<String> for ManifestFile {
 
 #[cfg(test)]
 mod tests {
-    use super::super::serde::*;
+    use super::super::model::*;
 
     #[test]
     fn accepts_full_manifest() {

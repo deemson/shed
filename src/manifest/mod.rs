@@ -1,5 +1,6 @@
-pub mod serde;
-pub use self::serde::*;
-pub mod string;
+pub mod model;
+pub use self::model::*;
 pub mod resolve;
-pub mod resolve2;
+pub mod string;
+#[cfg(test)]
+pub(crate) use self::resolve::testing;

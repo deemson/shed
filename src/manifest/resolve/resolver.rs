@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 
 use super::error::Error;
 use super::event::Event;
-use super::manifest::Manifest;
+use super::model::Manifest;
 use crate::manifest::ManifestFile;
 
 #[derive(Clone)]
@@ -31,6 +31,10 @@ pub struct Resolver {
 }
 
 impl Resolver {
+    pub fn new(event_sender: mpsc::Sender<Event>) -> Self {
+        Self { event_sender }
+    }
+
     pub async fn resolve(&self, inputs: impl IntoIterator<Item = Input>) -> Vec<Manifest> {
         let manifests = self
             .resolve_manifest_files(Vec::new(), Vec::new(), inputs)
@@ -206,91 +210,31 @@ impl Resolver {
 
 #[cfg(test)]
 mod tests {
-    use crate::manifest::RootItem;
+    use crate::manifest::{RootItem, resolve::testing::*};
 
     use super::*;
 
-    use std::{fs, path::Path};
     use tempfile::TempDir;
-
-    fn write(path: &Path, source: &str) {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).unwrap();
-        }
-        fs::write(path, source).unwrap();
-    }
-
-    fn assert_contains_started(events: &[Event], expected_index: &[usize]) {
-        assert!(events.iter().any(|event| {
-            matches!(event, Event::Started { index } if index.as_slice() == expected_index)
-        }));
-    }
-
-    fn assert_contains_resolved(events: &[Event], expected_index: &[usize]) {
-        assert!(events.iter().any(|event| {
-            matches!(event, Event::Resolved { index } if index.as_slice() == expected_index)
-        }));
-    }
-
-    fn assert_no_errors(events: &[Event]) {
-        assert!(
-            !events
-                .iter()
-                .any(|event| matches!(event, Event::Error { .. }))
-        );
-    }
-
-    fn assert_done_last(events: &[Event]) {
-        assert!(matches!(events.last(), Some(Event::Done)));
-    }
-
-    async fn resolve(inputs: impl IntoIterator<Item = Input>) -> (Vec<Manifest>, Vec<Event>) {
-        let (sender, mut receiver) = mpsc::channel(1);
-        let resolver = Resolver {
-            event_sender: sender,
-        };
-        let produce = async {
-            let manifests = resolver.resolve(inputs).await;
-            drop(resolver);
-            manifests
-        };
-
-        let collect = async {
-            let mut events = Vec::new();
-            while let Some(event) = receiver.recv().await {
-                events.push(event);
-            }
-            events
-        };
-
-        tokio::join!(produce, collect)
-    }
 
     #[tokio::test]
     async fn resolves_two_simple_manifests() {
         let temp_dir = TempDir::new().unwrap();
 
-        let parent_path = temp_dir.path().join("parent").with_extension("yaml");
         #[rustfmt::skip]
-        let parent_content = [
+        let parent_path = write_yaml_manifest(temp_dir.path(), "parent", &[
             "include:",
             "  - child",
             "items:",
             "  - path: parent-path",
             "    shed: parent-shed"
-        ].join("\n");
-        write(&parent_path, &parent_content);
-        let parent_path = fs::canonicalize(parent_path).unwrap();
+        ]);
 
-        let child_path = temp_dir.path().join("child").with_extension("yaml");
         #[rustfmt::skip]
-        let child_content = [
+        let child_path = write_yaml_manifest(temp_dir.path(), "child", &[
             "items:",
             "  - path: child-path",
             "    shed: child-shed"
-        ].join("\n");
-        write(&child_path, &child_content);
-        let child_path = fs::canonicalize(child_path).unwrap();
+        ]);
 
         let (actual, events) = resolve(vec![Input {
             name: String::from("parent"),
@@ -318,12 +262,12 @@ mod tests {
             }],
         }];
 
-        assert_contains_started(&events, &[0]);
-        assert_contains_started(&events, &[0, 0]);
-        assert_contains_resolved(&events, &[0]);
-        assert_contains_resolved(&events, &[0, 0]);
-        assert_no_errors(&events);
-        assert_done_last(&events);
+        assert_events_contain_started(&events, &[0]);
+        assert_events_contain_started(&events, &[0, 0]);
+        assert_events_contain_resolved(&events, &[0]);
+        assert_events_contain_resolved(&events, &[0, 0]);
+        assert_events_contain_no_errors(&events);
+        assert_events_contain_done_last(&events);
 
         assert_eq!(actual, expected)
     }
@@ -332,32 +276,23 @@ mod tests {
     async fn reports_the_start_and_end_of_a_cycle() {
         let temp_dir = TempDir::new().unwrap();
 
-        let m1_path = temp_dir.path().join("m1").with_extension("yaml");
         #[rustfmt::skip]
-        let m1_content = [
+        let m1_path = write_yaml_manifest(temp_dir.path(), "m1", &[
             "include:",
             "  - m2",
-        ].join("\n");
-        write(&m1_path, &m1_content);
-        let m1_path = fs::canonicalize(m1_path).unwrap();
+        ]);
 
-        let m2_path = temp_dir.path().join("m2").with_extension("yaml");
         #[rustfmt::skip]
-        let m2_content = [
+        let m2_path = write_yaml_manifest(temp_dir.path(), "m2", &[
             "include:",
             "  - m3",
-        ].join("\n");
-        write(&m2_path, &m2_content);
-        let m2_path = fs::canonicalize(m2_path).unwrap();
+        ]);
 
-        let m3_path = temp_dir.path().join("m3").with_extension("yaml");
         #[rustfmt::skip]
-        let m3_content = [
+        let m3_path = write_yaml_manifest(temp_dir.path(), "m3", &[
             "include:",
             "  - m1",
-        ].join("\n");
-        write(&m3_path, &m3_content);
-        let m3_path = fs::canonicalize(m3_path).unwrap();
+        ]);
 
         let (actual, events) = resolve(vec![Input {
             name: String::from("m1"),
@@ -394,7 +329,7 @@ mod tests {
                 error: Error::Cycle { start_index },
             } if index.as_slice() == [0, 0, 0, 0] && start_index.as_slice() == [0]
         )));
-        assert_done_last(&events);
+        assert_events_contain_done_last(&events);
 
         assert_eq!(actual, expected)
     }
