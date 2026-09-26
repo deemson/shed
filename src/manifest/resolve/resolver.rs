@@ -214,27 +214,34 @@ mod tests {
 
     use super::*;
 
+    use indoc::indoc;
     use tempfile::TempDir;
 
     #[tokio::test]
     async fn resolves_two_simple_manifests() {
         let temp_dir = TempDir::new().unwrap();
 
-        #[rustfmt::skip]
-        let parent_path = write_yaml_manifest(temp_dir.path(), "parent", &[
-            "include:",
-            "  - child",
-            "items:",
-            "  - path: parent-path",
-            "    shed: parent-shed"
-        ]);
+        let parent_path = write_yaml_manifest(
+            temp_dir.path(),
+            "parent",
+            indoc! {"
+              include:
+                - child
+              items:
+                - path: parent-path
+                  shed: parent-shed
+            "},
+        );
 
-        #[rustfmt::skip]
-        let child_path = write_yaml_manifest(temp_dir.path(), "child", &[
-            "items:",
-            "  - path: child-path",
-            "    shed: child-shed"
-        ]);
+        let child_path = write_yaml_manifest(
+            temp_dir.path(),
+            "child",
+            indoc! {"
+              items:
+                - path: child-path
+                  shed: child-shed
+            "},
+        );
 
         let (actual, events) = resolve(vec![Input {
             name: String::from("parent"),
@@ -276,23 +283,32 @@ mod tests {
     async fn reports_the_start_and_end_of_a_cycle() {
         let temp_dir = TempDir::new().unwrap();
 
-        #[rustfmt::skip]
-        let m1_path = write_yaml_manifest(temp_dir.path(), "m1", &[
-            "include:",
-            "  - m2",
-        ]);
+        let m1_path = write_yaml_manifest(
+            temp_dir.path(),
+            "m1",
+            indoc! {"
+              include:
+                - m2
+            "},
+        );
 
-        #[rustfmt::skip]
-        let m2_path = write_yaml_manifest(temp_dir.path(), "m2", &[
-            "include:",
-            "  - m3",
-        ]);
+        let m2_path = write_yaml_manifest(
+            temp_dir.path(),
+            "m2",
+            indoc! {"
+              include:
+                - m3
+            "},
+        );
 
-        #[rustfmt::skip]
-        let m3_path = write_yaml_manifest(temp_dir.path(), "m3", &[
-            "include:",
-            "  - m1",
-        ]);
+        let m3_path = write_yaml_manifest(
+            temp_dir.path(),
+            "m3",
+            indoc! {"
+              include:
+                - m1
+            "},
+        );
 
         let (actual, events) = resolve(vec![Input {
             name: String::from("m1"),

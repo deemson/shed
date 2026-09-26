@@ -19,25 +19,25 @@ impl TryFrom<String> for ManifestFile {
 #[cfg(test)]
 mod tests {
     use super::super::model::*;
+    use indoc::indoc;
 
     #[test]
     fn accepts_full_manifest() {
-        #[rustfmt::skip]
-        let s = [
-            "include:",
-            "  - manifest1",
-            "  - manifest2",
-            "items:",
-            "  - path: item1-path",
-            "    shed: item1-shed",
-            "  - path: item2-path",
-            "    shed: item2-shed",
-            "    items:",
-            "      - item2-string-item",
-            "      - path: item2-object-item-path",
-            "        shed: item2-object-item-shed",
-        ].join("\n");
-        let actual = ManifestFile::try_from(s).unwrap();
+        let actual = ManifestFile::try_from(indoc! {"
+          include:
+            - manifest1
+            - manifest2
+          items:
+            - path: item1-path
+              shed: item1-shed
+            - path: item2-path
+              shed: item2-shed
+              items:
+                - item2-string-item
+                - path: item2-object-item-path
+                  shed: item2-object-item-shed
+        "})
+        .unwrap();
         let expected = ManifestFile {
             include: ["manifest1", "manifest2"].map(String::from).into(),
             items: vec![
@@ -77,11 +77,7 @@ mod tests {
 
     #[test]
     fn rejects_unknown_fields() {
-        #[rustfmt::skip]
-        let s = [
-            "bad: value",
-        ].join("\n");
-        let res = ManifestFile::try_from(s);
+        let res = ManifestFile::try_from("bad: value");
         let error = res.expect_err("must error");
 
         assert_eq!(
@@ -92,12 +88,7 @@ mod tests {
 
     #[test]
     fn accepts_empty_manifest() {
-        #[rustfmt::skip]
-        let s = [
-            "{}",
-        ].join("\n");
-
-        let actual = ManifestFile::try_from(s).unwrap();
+        let actual = ManifestFile::try_from("{}").unwrap();
         let expected = ManifestFile {
             include: vec![],
             items: vec![],
@@ -108,12 +99,10 @@ mod tests {
 
     #[test]
     fn rejects_bare_string_root_items() {
-        #[rustfmt::skip]
-        let s = [
-            "items:",
-            "  - bare-string",
-        ].join("\n");
-        let res = ManifestFile::try_from(s);
+        let res = ManifestFile::try_from(indoc! {"
+          items:
+            - bare-string
+        "});
         let error = res.expect_err("must error");
 
         assert_eq!(

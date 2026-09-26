@@ -83,6 +83,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "archery"
+version = "1.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33ca55ee147b1926dbea904f50fe4902494e97bc742205abbbf10c709e43815f"
+
+[[package]]
 name = "async-channel"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -825,6 +831,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.5",
+]
+
+[[package]]
+name = "iradix"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8482246825ab4794e714c425e3e4aa57bad4d57b05a430c5808441cebac4b2d"
+dependencies = [
+ "archery",
+ "event-listener",
+ "smallvec",
 ]
 
 [[package]]
@@ -1639,6 +1656,8 @@ dependencies = [
  "clap",
  "ctrlc",
  "futures",
+ "indoc",
+ "iradix",
  "ratatui",
  "schemars",
  "serde",

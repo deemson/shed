@@ -8,16 +8,20 @@ use std::{
     path::{Path, PathBuf},
 };
 
-fn write(path: &Path, source: &str) {
+fn write<C: AsRef<[u8]>>(path: &Path, contents: C) {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).unwrap();
     }
-    fs::write(path, source).unwrap();
+    fs::write(path, contents).unwrap();
 }
 
-pub(crate) fn write_yaml_manifest(directory: &Path, name: &str, lines: &[&str]) -> PathBuf {
+pub(crate) fn write_yaml_manifest<C: AsRef<[u8]>>(
+    directory: &Path,
+    name: &str,
+    contents: C,
+) -> PathBuf {
     let path = directory.join(name).with_extension("yaml");
-    write(&path, &lines.join("\n"));
+    write(&path, contents);
     fs::canonicalize(path).unwrap()
 }
 
@@ -45,7 +49,9 @@ pub(crate) fn assert_events_contain_done_last(events: &[Event]) {
     assert!(matches!(events.last(), Some(Event::Done)));
 }
 
-pub(crate) async fn resolve(inputs: impl IntoIterator<Item = Input>) -> (Vec<Manifest>, Vec<Event>) {
+pub(crate) async fn resolve(
+    inputs: impl IntoIterator<Item = Input>,
+) -> (Vec<Manifest>, Vec<Event>) {
     let (sender, mut receiver) = mpsc::channel(1);
     let resolver = Resolver::new(sender);
 
