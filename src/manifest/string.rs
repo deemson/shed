@@ -36,6 +36,7 @@ mod tests {
                 - item2-string-item
                 - path: item2-object-item-path
                   shed: item2-object-item-shed
+            - path: item3-path
         "})
         .unwrap();
         let expected = ManifestFile {
@@ -43,12 +44,12 @@ mod tests {
             items: vec![
                 RootItem {
                     path: "item1-path".into(),
-                    shed: "item1-shed".into(),
+                    shed: Some("item1-shed".into()),
                     items: None,
                 },
                 RootItem {
                     path: "item2-path".into(),
-                    shed: "item2-shed".into(),
+                    shed: Some("item2-shed".into()),
                     items: Some(vec![
                         ChildItem::Path("item2-string-item".into()),
                         ChildItem::Item(Item {
@@ -57,6 +58,11 @@ mod tests {
                             items: None,
                         }),
                     ]),
+                },
+                RootItem {
+                    path: "item3-path".into(),
+                    shed: None,
+                    items: None,
                 },
             ],
         };

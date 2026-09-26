@@ -258,13 +258,13 @@ mod tests {
                 manifests: Vec::new(),
                 items: vec![RootItem {
                     path: String::from("child-path"),
-                    shed: String::from("child-shed"),
+                    shed: Some(String::from("child-shed")),
                     items: None,
                 }],
             }],
             items: vec![RootItem {
                 path: String::from("parent-path"),
-                shed: String::from("parent-shed"),
+                shed: Some(String::from("parent-shed")),
                 items: None,
             }],
         }];

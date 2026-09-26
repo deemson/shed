@@ -14,7 +14,7 @@ pub struct ManifestFile {
 #[serde(deny_unknown_fields, expecting = "an object")]
 pub struct RootItem {
     pub path: String,
-    pub shed: String,
+    pub shed: Option<String>,
     #[serde(default)]
     #[schemars(with = "Vec<ChildItem>")]
     pub items: Option<Vec<ChildItem>>,
