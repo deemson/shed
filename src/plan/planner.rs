@@ -1,8 +1,24 @@
-use super::model::{Direction, Root};
-use crate::manifest::Manifest;
+use std::path::PathBuf;
+
+use super::model::{Direction, Directory, File, Root};
+use crate::manifest::{ChildItem, Item, Manifest};
 
 pub struct Planner {
     direction: Direction,
+}
+
+struct PlannedOperations {
+    directory_removals: Option<Vec<PlannedDirectoryRemoval>>,
+    file_copies: Option<Vec<PlannedFileCopy>>,
+}
+
+struct PlannedDirectoryRemoval {
+    dst: PathBuf,
+}
+
+struct PlannedFileCopy {
+    src: PathBuf,
+    dst: PathBuf,
 }
 
 impl Planner {
@@ -13,6 +29,56 @@ impl Planner {
     pub async fn plan(&self, manifests: impl IntoIterator<Item = Manifest>) -> Vec<Root> {
         todo!()
     }
+
+    async fn plan_manifests(
+        &self,
+        manifests: impl IntoIterator<Item = Manifest>,
+    ) -> Vec<(Vec<Directory>, Vec<File>)> {
+        todo!()
+    }
+
+    async fn plan_manifest(&self, manifest: Manifest) -> (Vec<Directory>, Vec<File>) {
+        todo!()
+    }
+
+    async fn plan_child_items(
+        &self,
+        path_parent: PathBuf,
+        shed_parent: PathBuf,
+        child_items: Vec<ChildItem>,
+    ) -> PlannedOperations {
+        todo!()
+    }
+
+    async fn plan_child_item(&self, child_item: ChildItem) -> Root {
+        todo!()
+    }
+
+    async fn plan_item(
+        &self,
+        path_parent: PathBuf,
+        shed_parent: PathBuf,
+        item: Item,
+    ) -> PlannedOperations {
+        let path = path_parent.join(&item.path);
+        let shed = shed_parent.join(item.shed.as_ref().unwrap_or(&item.path));
+        if let Some(child_items) = item.items {
+            return self.plan_child_items(path, shed, child_items).await;
+        }
+        let (src, dst) = self.resolve_direction(path, shed);
+        todo!()
+    }
+
+    fn resolve_direction(&self, path: PathBuf, shed: PathBuf) -> (PathBuf, PathBuf) {
+        match &self.direction {
+            Direction::Put => (path, shed),
+            Direction::Get => (shed, path),
+        }
+    }
+}
+
+async fn plan_directory_item(src: PathBuf, dst: PathBuf) -> Vec<PlannedFileCopy> {
+    todo!()
 }
 
 #[cfg(test)]
