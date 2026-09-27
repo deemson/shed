@@ -6,9 +6,17 @@ pub enum Direction {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct Directory {
+pub struct Root {
     pub dst: PathBuf,
-    pub is_to_be_cleaned: bool,
+    pub is_clean_dst: bool,
+    pub directories: Option<Vec<Directory>>,
+    pub files: Option<Vec<File>>,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Directory {
+    pub dst: OsString,
+    pub is_clean_dst: bool,
     pub directories: Option<Vec<Directory>>,
     pub files: Option<Vec<File>>,
 }
