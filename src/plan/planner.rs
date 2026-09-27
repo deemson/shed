@@ -1,12 +1,27 @@
-pub struct Planner {}
+use super::model::{Direction, Root};
+use crate::manifest::Manifest;
 
-impl Planner {}
+pub struct Planner {
+    direction: Direction,
+}
+
+impl Planner {
+    pub fn new(direction: Direction) -> Self {
+        Self { direction }
+    }
+
+    pub async fn plan(&self, manifests: impl IntoIterator<Item = Manifest>) -> Vec<Root> {
+        todo!()
+    }
+}
 
 #[cfg(test)]
 mod tests {
+    use super::super::testing as testing_p;
     use crate::{
+        manifest::Input,
         manifest::testing as testing_m,
-        plan::model::{Directory, File, Root},
+        plan::model::{Direction, Directory, File, Root},
     };
     use indoc::formatdoc;
     use tempfile::TempDir;
@@ -32,6 +47,26 @@ mod tests {
                             - file2
             "},
         );
+
+        testing_m::write(
+            &shed_dir.path().join("intermediate-dir/sub-dir/file1"),
+            "file1 contents",
+        );
+        testing_m::write(
+            &shed_dir.path().join("intermediate-dir/sub-dir/file2"),
+            "file2 contents",
+        );
+
+        let (manifests, resolve_events) = testing_m::resolve(vec![Input {
+            name: "manifest".into(),
+            path: manifest_path,
+        }])
+        .await;
+        let actual = testing_p::plan(Direction::Get, manifests).await;
+
+        testing_m::assert_events_contain_no_errors(&resolve_events);
+        testing_m::assert_events_contain_done_last(&resolve_events);
+
         let expected = [Root {
             dst: path_dir.path().into(),
             is_clean_dst: false,
@@ -57,6 +92,8 @@ mod tests {
             }]),
             files: None,
         }];
+
+        assert_eq!(actual, expected)
     }
 
     #[tokio::test]
@@ -80,6 +117,20 @@ mod tests {
                     - file2
             "},
         );
+
+        testing_m::write(&shed_dir.path().join("file1"), "file1 contents");
+        testing_m::write(&shed_dir.path().join("file2"), "file2 contents");
+
+        let (manifests, resolve_events) = testing_m::resolve(vec![Input {
+            name: "manifest".into(),
+            path: manifest_path,
+        }])
+        .await;
+        let actual = testing_p::plan(Direction::Get, manifests).await;
+
+        testing_m::assert_events_contain_no_errors(&resolve_events);
+        testing_m::assert_events_contain_done_last(&resolve_events);
+
         let expected = [
             Root {
                 dst: path_dir1.path().into(),
@@ -100,6 +151,8 @@ mod tests {
                 }]),
             },
         ];
+
+        assert_eq!(actual, expected)
     }
 
     #[tokio::test]
@@ -118,6 +171,20 @@ mod tests {
                     - sub-dir
             "},
         );
+
+        testing_m::write(&shed_dir.path().join("sub-dir/file1"), "file1 contents");
+        testing_m::write(&shed_dir.path().join("sub-dir/file2"), "file2 contents");
+
+        let (manifests, resolve_events) = testing_m::resolve(vec![Input {
+            name: "manifest".into(),
+            path: manifest_path,
+        }])
+        .await;
+        let actual = testing_p::plan(Direction::Get, manifests).await;
+
+        testing_m::assert_events_contain_no_errors(&resolve_events);
+        testing_m::assert_events_contain_done_last(&resolve_events);
+
         let expected = [Root {
             dst: path_dir.path().into(),
             is_clean_dst: false,
@@ -138,6 +205,8 @@ mod tests {
             }]),
             files: None,
         }];
+
+        assert_eq!(actual, expected)
     }
 
     #[tokio::test]
@@ -156,6 +225,19 @@ mod tests {
             "},
         );
 
+        testing_m::write(&shed_dir.path().join("shed-dir/file1"), "file1 contents");
+        testing_m::write(&shed_dir.path().join("shed-dir/file2"), "file2 contents");
+
+        let (manifests, resolve_events) = testing_m::resolve(vec![Input {
+            name: "manifest".into(),
+            path: manifest_path,
+        }])
+        .await;
+        let actual = testing_p::plan(Direction::Get, manifests).await;
+
+        testing_m::assert_events_contain_no_errors(&resolve_events);
+        testing_m::assert_events_contain_done_last(&resolve_events);
+
         let expected = [Root {
             dst: path_dir.path().into(),
             is_clean_dst: true,
@@ -171,5 +253,7 @@ mod tests {
                 },
             ]),
         }];
+
+        assert_eq!(actual, expected)
     }
 }

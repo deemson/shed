@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-fn write<C: AsRef<[u8]>>(path: &Path, contents: C) {
+pub(crate) fn write<C: AsRef<[u8]>>(path: &Path, contents: C) {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).unwrap();
     }
