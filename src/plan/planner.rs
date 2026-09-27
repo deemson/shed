@@ -1,11 +1,10 @@
 use std::path::PathBuf;
 
+use super::error::Error;
+use super::event::Event;
 use super::model::{Direction, Directory, File, Root};
 use crate::manifest::{ChildItem, Item, Manifest};
-
-pub struct Planner {
-    direction: Direction,
-}
+use tokio::sync::mpsc;
 
 struct PlannedOperations {
     directory_removals: Option<Vec<PlannedDirectoryRemoval>>,
@@ -21,9 +20,17 @@ struct PlannedFileCopy {
     dst: PathBuf,
 }
 
+pub struct Planner {
+    direction: Direction,
+    event_sender: mpsc::Sender<Event>,
+}
+
 impl Planner {
-    pub fn new(direction: Direction) -> Self {
-        Self { direction }
+    pub fn new(direction: Direction, event_sender: mpsc::Sender<Event>) -> Self {
+        Self {
+            direction,
+            event_sender,
+        }
     }
 
     pub async fn plan(&self, manifests: impl IntoIterator<Item = Manifest>) -> Vec<Root> {
@@ -46,12 +53,31 @@ impl Planner {
         path_parent: PathBuf,
         shed_parent: PathBuf,
         child_items: Vec<ChildItem>,
-    ) -> PlannedOperations {
+    ) -> Option<PlannedOperations> {
         todo!()
     }
 
-    async fn plan_child_item(&self, child_item: ChildItem) -> Root {
-        todo!()
+    async fn plan_child_item(
+        &self,
+        path_parent: PathBuf,
+        shed_parent: PathBuf,
+        child_item: ChildItem,
+    ) -> Option<PlannedOperations> {
+        match child_item {
+            ChildItem::Path(path) => {
+                self.plan_item(
+                    path_parent,
+                    shed_parent,
+                    Item {
+                        path,
+                        shed: None,
+                        items: None,
+                    },
+                )
+                .await
+            }
+            ChildItem::Item(item) => self.plan_item(path_parent, shed_parent, item).await,
+        }
     }
 
     async fn plan_item(
@@ -59,14 +85,25 @@ impl Planner {
         path_parent: PathBuf,
         shed_parent: PathBuf,
         item: Item,
-    ) -> PlannedOperations {
+    ) -> Option<PlannedOperations> {
         let path = path_parent.join(&item.path);
         let shed = shed_parent.join(item.shed.as_ref().unwrap_or(&item.path));
         if let Some(child_items) = item.items {
             return self.plan_child_items(path, shed, child_items).await;
         }
         let (src, dst) = self.resolve_direction(path, shed);
-        todo!()
+        match (src.is_dir(), dst.is_dir()) {
+            (true, true) => Some(PlannedOperations {
+                directory_removals: Some(vec![PlannedDirectoryRemoval { dst: dst.clone() }]),
+                file_copies: Some(plan_directory_item(src, dst).await),
+            }),
+            (true, false) => self.error_plan(Error::SrcDirDstNot).await,
+            (false, true) => self.error_plan(Error::DstDirSrcNot).await,
+            (false, false) => Some(PlannedOperations {
+                directory_removals: None,
+                file_copies: Some(vec![PlannedFileCopy { src, dst }]),
+            }),
+        }
     }
 
     fn resolve_direction(&self, path: PathBuf, shed: PathBuf) -> (PathBuf, PathBuf) {
@@ -74,6 +111,15 @@ impl Planner {
             Direction::Put => (path, shed),
             Direction::Get => (shed, path),
         }
+    }
+
+    async fn error_plan(&self, error: Error) -> Option<PlannedOperations> {
+        self.send_event(Event::Error { error }).await;
+        None
+    }
+
+    async fn send_event(&self, event: Event) {
+        let _ = self.event_sender.send(event).await;
     }
 }
 
@@ -128,10 +174,11 @@ mod tests {
             path: manifest_path,
         }])
         .await;
-        let actual = testing_p::plan(Direction::Get, manifests).await;
 
         testing_m::assert_events_contain_no_errors(&resolve_events);
         testing_m::assert_events_contain_done_last(&resolve_events);
+
+        let (actual, _) = testing_p::plan(Direction::Get, manifests).await;
 
         let expected = [Root {
             dst: path_dir.path().into(),
@@ -192,10 +239,11 @@ mod tests {
             path: manifest_path,
         }])
         .await;
-        let actual = testing_p::plan(Direction::Get, manifests).await;
 
         testing_m::assert_events_contain_no_errors(&resolve_events);
         testing_m::assert_events_contain_done_last(&resolve_events);
+
+        let (actual, _) = testing_p::plan(Direction::Get, manifests).await;
 
         let expected = [
             Root {
@@ -246,10 +294,11 @@ mod tests {
             path: manifest_path,
         }])
         .await;
-        let actual = testing_p::plan(Direction::Get, manifests).await;
 
         testing_m::assert_events_contain_no_errors(&resolve_events);
         testing_m::assert_events_contain_done_last(&resolve_events);
+
+        let (actual, _) = testing_p::plan(Direction::Get, manifests).await;
 
         let expected = [Root {
             dst: path_dir.path().into(),
@@ -299,10 +348,11 @@ mod tests {
             path: manifest_path,
         }])
         .await;
-        let actual = testing_p::plan(Direction::Get, manifests).await;
 
         testing_m::assert_events_contain_no_errors(&resolve_events);
         testing_m::assert_events_contain_done_last(&resolve_events);
+
+        let (actual, _) = testing_p::plan(Direction::Get, manifests).await;
 
         let expected = [Root {
             dst: path_dir.path().into(),
