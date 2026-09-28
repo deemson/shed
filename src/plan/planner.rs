@@ -214,11 +214,8 @@ async fn plan_directory_item(src: PathBuf, dst: PathBuf) -> Result<Vec<PlannedFi
 #[cfg(test)]
 mod tests {
     use super::super::testing as testing_p;
-    use crate::{
-        manifest::Input,
-        manifest::testing as testing_m,
-        plan::model::{Direction, Directory, File, Root},
-    };
+    use super::*;
+    use crate::{manifest::Input, manifest::testing as testing_m};
     use indoc::formatdoc;
     use tempfile::TempDir;
 
@@ -454,6 +451,90 @@ mod tests {
             ]),
         }];
 
+        assert_eq!(actual, expected)
+    }
+
+    #[tokio::test]
+    async fn reports_an_error_when_source_is_a_directory_and_destination_is_a_file() {
+        let path_dir = TempDir::new().unwrap();
+        let shed_dir = TempDir::new().unwrap();
+
+        let path_dir_display = path_dir.path().display();
+        let manifest_path = testing_m::write_yaml_manifest(
+            shed_dir.path(),
+            "manifest",
+            formatdoc! {"
+              items:
+                - path: {path_dir_display}/something
+                  shed: something
+            "},
+        );
+
+        testing_m::create_dir(path_dir.path().join("something"));
+        testing_m::write(&shed_dir.path().join("something"), "contents");
+
+        let (manifests, resolve_events) = testing_m::resolve(vec![Input {
+            name: "manifest".into(),
+            path: manifest_path,
+        }])
+        .await;
+
+        testing_m::assert_events_contain_no_errors(&resolve_events);
+        testing_m::assert_events_contain_done_last(&resolve_events);
+
+        let (actual, plan_events) = testing_p::plan(Direction::Put, manifests).await;
+
+        assert!(plan_events.iter().any(|event| matches!(
+            event,
+            Event::Error {
+                error: Error::SrcDirDstNot,
+            }
+        )));
+        testing_p::assert_events_contain_done_last(&plan_events);
+
+        let expected = [];
+        assert_eq!(actual, expected)
+    }
+
+    #[tokio::test]
+    async fn reports_an_error_when_source_is_a_file_and_destination_is_a_directory() {
+        let path_dir = TempDir::new().unwrap();
+        let shed_dir = TempDir::new().unwrap();
+
+        let path_dir_display = path_dir.path().display();
+        let manifest_path = testing_m::write_yaml_manifest(
+            shed_dir.path(),
+            "manifest",
+            formatdoc! {"
+              items:
+                - path: {path_dir_display}/something
+                  shed: something
+            "},
+        );
+
+        testing_m::write(&path_dir.path().join("something"), "contents");
+        testing_m::create_dir(shed_dir.path().join("something"));
+
+        let (manifests, resolve_events) = testing_m::resolve(vec![Input {
+            name: "manifest".into(),
+            path: manifest_path,
+        }])
+        .await;
+
+        testing_m::assert_events_contain_no_errors(&resolve_events);
+        testing_m::assert_events_contain_done_last(&resolve_events);
+
+        let (actual, plan_events) = testing_p::plan(Direction::Put, manifests).await;
+
+        assert!(plan_events.iter().any(|event| matches!(
+            event,
+            Event::Error {
+                error: Error::DstDirSrcNot,
+            }
+        )));
+        testing_p::assert_events_contain_done_last(&plan_events);
+
+        let expected = [];
         assert_eq!(actual, expected)
     }
 }
