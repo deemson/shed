@@ -42,13 +42,38 @@ impl Planner {
 
     async fn plan_manifests(
         &self,
+        path_parent: PathBuf,
+        shed_parent: PathBuf,
         manifests: impl IntoIterator<Item = Manifest>,
-    ) -> Vec<(Vec<Directory>, Vec<File>)> {
-        todo!()
+    ) -> Option<PlannedOperations> {
+        let plans = join_all(manifests.into_iter().map(|manifest| {
+            self.plan_manifest(path_parent.clone(), shed_parent.clone(), manifest)
+        }))
+        .await;
+
+        consolidate_plans(plans)
     }
 
-    async fn plan_manifest(&self, manifest: Manifest) -> (Vec<Directory>, Vec<File>) {
-        todo!()
+    async fn plan_manifest(
+        &self,
+        path_parent: PathBuf,
+        shed_parent: PathBuf,
+        manifest: Manifest,
+    ) -> Option<PlannedOperations> {
+        let child_items = manifest.items.into_iter().map(|item| {
+            ChildItem::Item(Item {
+                path: item.path,
+                shed: item.shed,
+                items: item.items,
+            })
+        });
+
+        let (manifest_plan, item_plan) = futures::join!(
+            self.plan_manifests(path_parent.clone(), shed_parent.clone(), manifest.manifests),
+            self.plan_child_items(path_parent, shed_parent, child_items.collect()),
+        );
+
+        consolidate_plans([manifest_plan, item_plan])
     }
 
     async fn plan_child_items(
@@ -62,26 +87,7 @@ impl Planner {
         }))
         .await;
 
-        let mut directory_removals = Vec::new();
-        let mut file_copies = Vec::new();
-
-        for plan in plans.into_iter().flatten() {
-            if let Some(mut removals) = plan.directory_removals {
-                directory_removals.append(&mut removals);
-            }
-            if let Some(mut copies) = plan.file_copies {
-                file_copies.append(&mut copies);
-            }
-        }
-
-        if directory_removals.is_empty() && file_copies.is_empty() {
-            None
-        } else {
-            Some(PlannedOperations {
-                directory_removals: (!directory_removals.is_empty()).then_some(directory_removals),
-                file_copies: (!file_copies.is_empty()).then_some(file_copies),
-            })
-        }
+        consolidate_plans(plans)
     }
 
     async fn plan_child_item(
@@ -150,6 +156,31 @@ impl Planner {
 
     async fn send_event(&self, event: Event) {
         let _ = self.event_sender.send(event).await;
+    }
+}
+
+fn consolidate_plans(
+    plans: impl IntoIterator<Item = Option<PlannedOperations>>,
+) -> Option<PlannedOperations> {
+    let mut directory_removals = Vec::new();
+    let mut file_copies = Vec::new();
+
+    for plan in plans.into_iter().flatten() {
+        if let Some(mut removals) = plan.directory_removals {
+            directory_removals.append(&mut removals);
+        }
+        if let Some(mut copies) = plan.file_copies {
+            file_copies.append(&mut copies);
+        }
+    }
+
+    if directory_removals.is_empty() && file_copies.is_empty() {
+        None
+    } else {
+        Some(PlannedOperations {
+            directory_removals: (!directory_removals.is_empty()).then_some(directory_removals),
+            file_copies: (!file_copies.is_empty()).then_some(file_copies),
+        })
     }
 }
 
