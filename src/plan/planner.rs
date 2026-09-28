@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use async_walkdir::WalkDir;
-use futures::StreamExt;
+use futures::{StreamExt, future::join_all};
 
 use super::error::Error;
 use super::event::Event;
@@ -57,7 +57,31 @@ impl Planner {
         shed_parent: PathBuf,
         child_items: Vec<ChildItem>,
     ) -> Option<PlannedOperations> {
-        todo!()
+        let plans = join_all(child_items.into_iter().map(|child_item| {
+            self.plan_child_item(path_parent.clone(), shed_parent.clone(), child_item)
+        }))
+        .await;
+
+        let mut directory_removals = Vec::new();
+        let mut file_copies = Vec::new();
+
+        for plan in plans.into_iter().flatten() {
+            if let Some(mut removals) = plan.directory_removals {
+                directory_removals.append(&mut removals);
+            }
+            if let Some(mut copies) = plan.file_copies {
+                file_copies.append(&mut copies);
+            }
+        }
+
+        if directory_removals.is_empty() && file_copies.is_empty() {
+            None
+        } else {
+            Some(PlannedOperations {
+                directory_removals: (!directory_removals.is_empty()).then_some(directory_removals),
+                file_copies: (!file_copies.is_empty()).then_some(file_copies),
+            })
+        }
     }
 
     async fn plan_child_item(
