@@ -1,5 +1,8 @@
 use std::path::PathBuf;
 
+use async_walkdir::WalkDir;
+use futures::StreamExt;
+
 use super::error::Error;
 use super::event::Event;
 use super::model::{Direction, Directory, File, Root};
@@ -93,10 +96,13 @@ impl Planner {
         }
         let (src, dst) = self.resolve_direction(path, shed);
         match (src.is_dir(), dst.is_dir()) {
-            (true, true) => Some(PlannedOperations {
-                directory_removals: Some(vec![PlannedDirectoryRemoval { dst: dst.clone() }]),
-                file_copies: Some(plan_directory_item(src, dst).await),
-            }),
+            (true, true) => match plan_directory_item(src, dst.clone()).await {
+                Ok(file_copies) => Some(PlannedOperations {
+                    directory_removals: Some(vec![PlannedDirectoryRemoval { dst }]),
+                    file_copies: Some(file_copies),
+                }),
+                Err(error) => self.error_plan(error).await,
+            },
             (true, false) => self.error_plan(Error::SrcDirDstNot).await,
             (false, true) => self.error_plan(Error::DstDirSrcNot).await,
             (false, false) => Some(PlannedOperations {
@@ -123,8 +129,31 @@ impl Planner {
     }
 }
 
-async fn plan_directory_item(src: PathBuf, dst: PathBuf) -> Vec<PlannedFileCopy> {
-    todo!()
+async fn plan_directory_item(src: PathBuf, dst: PathBuf) -> Result<Vec<PlannedFileCopy>, Error> {
+    let mut entries = WalkDir::new(&src);
+    let mut file_copies = Vec::new();
+
+    while let Some(entry) = entries.next().await {
+        let entry = entry.map_err(|source| Error::WalkDirectory { source })?;
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .await
+            .map_err(|source| Error::InspectSrcPath { source })?;
+
+        if !file_type.is_dir() {
+            let relative = path
+                .strip_prefix(&src)
+                .expect("a walked path is beneath its source directory");
+            let destination = dst.join(relative);
+            file_copies.push(PlannedFileCopy {
+                src: path,
+                dst: destination,
+            });
+        }
+    }
+
+    Ok(file_copies)
 }
 
 #[cfg(test)]
