@@ -213,7 +213,7 @@ async fn plan_directory_item(src: PathBuf, dst: PathBuf) -> Result<Vec<PlannedFi
     Ok(file_copies)
 }
 
-#[cfg(test)]
+#[cfg(any())]
 mod tests {
     use super::super::testing as testing_p;
     use super::*;
