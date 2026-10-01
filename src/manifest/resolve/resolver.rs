@@ -96,29 +96,36 @@ impl Resolver {
             }
         };
 
+        let ManifestFile {
+            path: manifest_path,
+            shed,
+            include,
+            items,
+        } = manifest_file;
+
         let mut input_stack = input_stack;
         input_stack.push(input.clone());
 
-        let manifests = join_all(manifest_file.include.into_iter().enumerate().map(
-            |(position, name)| {
-                let active = input_stack.clone();
-                let path = &input.path;
-                let mut child_index = index.clone();
-                child_index.push(position);
-                async move {
-                    self.resolve_manifest_file_include(active, child_index, path, &name)
-                        .await
-                }
-            },
-        ))
+        let manifests = join_all(include.into_iter().enumerate().map(|(position, name)| {
+            let active = input_stack.clone();
+            let path = &input.path;
+            let mut child_index = index.clone();
+            child_index.push(position);
+            async move {
+                self.resolve_manifest_file_include(active, child_index, path, &name)
+                    .await
+            }
+        }))
         .await;
 
         self.send_event(Event::Resolved { index }).await;
         Manifest {
             name: input.name,
-            path: input.path,
+            location: input.path,
+            path: manifest_path,
+            shed,
             manifests,
-            items: manifest_file.items,
+            items,
         }
     }
 
@@ -197,7 +204,9 @@ impl Resolver {
         self.send_event(Event::Error { index, error }).await;
         Manifest {
             name: input.name,
-            path: input.path,
+            location: input.path,
+            path: None,
+            shed: None,
             manifests: Vec::new(),
             items: Vec::new(),
         }
@@ -210,7 +219,7 @@ impl Resolver {
 
 #[cfg(test)]
 mod tests {
-    use crate::manifest::{RootItem, resolve::testing::*};
+    use crate::manifest::{Item, ItemKind, resolve::testing::*};
 
     use super::*;
 
@@ -225,11 +234,13 @@ mod tests {
             temp_dir.path(),
             "parent",
             indoc! {"
+              path: parent-path
+              shed: parent-shed
               include:
                 - child
               items:
-                - path: parent-path
-                  shed: parent-shed
+                - path: parent-item-path
+                  shed: parent-item-shed
             "},
         );
 
@@ -237,9 +248,10 @@ mod tests {
             temp_dir.path(),
             "child",
             indoc! {"
+              path: child-path
+              shed: child-shed
               items:
-                - path: child-path
-                  shed: child-shed
+                - child-item-string
             "},
         );
 
@@ -251,22 +263,22 @@ mod tests {
 
         let expected = vec![Manifest {
             name: String::from("parent"),
-            path: parent_path,
+            location: parent_path,
+            path: Some(String::from("parent-path")),
+            shed: Some(String::from("parent-shed")),
             manifests: vec![Manifest {
                 name: String::from("child"),
-                path: child_path,
+                location: child_path,
+                path: Some(String::from("child-path")),
+                shed: Some(String::from("child-shed")),
                 manifests: Vec::new(),
-                items: vec![RootItem {
-                    path: String::from("child-path"),
-                    shed: Some(String::from("child-shed")),
-                    items: None,
-                }],
+                items: vec![ItemKind::Path(String::from("child-item-string"))],
             }],
-            items: vec![RootItem {
-                path: String::from("parent-path"),
-                shed: Some(String::from("parent-shed")),
+            items: vec![ItemKind::Item(Item {
+                path: String::from("parent-item-path"),
+                shed: Some(String::from("parent-item-shed")),
                 items: None,
-            }],
+            })],
         }];
 
         assert_events_contain_started(&events, &[0]);
@@ -277,6 +289,38 @@ mod tests {
         assert_events_contain_done_last(&events);
 
         assert_eq!(actual, expected)
+    }
+
+    #[tokio::test]
+    async fn preserves_a_placeholder_for_read_errors() {
+        let temp_dir = TempDir::new().unwrap();
+        let missing_path = temp_dir.path().join("missing.yaml");
+
+        let (actual, events) = resolve(vec![Input {
+            name: String::from("missing"),
+            path: missing_path.clone(),
+        }])
+        .await;
+
+        assert_eq!(
+            actual,
+            vec![Manifest {
+                name: String::from("missing"),
+                location: missing_path,
+                path: None,
+                shed: None,
+                manifests: Vec::new(),
+                items: Vec::new(),
+            }]
+        );
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Event::Error {
+                index,
+                error: Error::Io { .. },
+            } if index.as_slice() == [0]
+        )));
+        assert_events_contain_done_last(&events);
     }
 
     #[tokio::test]
@@ -318,16 +362,24 @@ mod tests {
 
         let expected = vec![Manifest {
             name: String::from("m1"),
-            path: m1_path.clone(),
+            location: m1_path.clone(),
+            path: None,
+            shed: None,
             manifests: vec![Manifest {
                 name: String::from("m2"),
-                path: m2_path,
+                location: m2_path,
+                path: None,
+                shed: None,
                 manifests: vec![Manifest {
                     name: String::from("m3"),
-                    path: m3_path,
+                    location: m3_path,
+                    path: None,
+                    shed: None,
                     manifests: vec![Manifest {
                         name: String::from("m1"),
-                        path: m1_path,
+                        location: m1_path,
+                        path: None,
+                        shed: None,
                         manifests: Vec::new(),
                         items: Vec::new(),
                     }],

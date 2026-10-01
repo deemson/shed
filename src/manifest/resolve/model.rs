@@ -1,12 +1,14 @@
-use crate::manifest::RootItem;
+use crate::manifest::ItemKind;
 use std::path::PathBuf;
 
 #[derive(Debug, PartialEq)]
 pub struct Manifest {
     pub name: String,
-    pub path: PathBuf,
+    pub location: PathBuf,
+    pub path: Option<String>,
+    pub shed: Option<String>,
     pub manifests: Vec<Manifest>,
-    pub items: Vec<RootItem>,
+    pub items: Vec<ItemKind>,
 }
 
 impl Manifest {
@@ -25,20 +27,28 @@ mod tests {
     fn gets_manifest_at_indexes() {
         let root = Manifest {
             name: "root".into(),
-            path: PathBuf::from("root"),
+            location: PathBuf::from("root"),
+            path: None,
+            shed: None,
             manifests: vec![Manifest {
                 name: "child".into(),
-                path: PathBuf::from("child"),
+                location: PathBuf::from("child"),
+                path: None,
+                shed: None,
                 manifests: vec![
                     Manifest {
                         name: "first".into(),
-                        path: PathBuf::from("first"),
+                        location: PathBuf::from("first"),
+                        path: None,
+                        shed: None,
                         manifests: Vec::new(),
                         items: Vec::new(),
                     },
                     Manifest {
                         name: "second".into(),
-                        path: PathBuf::from("second"),
+                        location: PathBuf::from("second"),
+                        path: None,
+                        shed: None,
                         manifests: Vec::new(),
                         items: Vec::new(),
                     },

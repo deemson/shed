@@ -24,12 +24,13 @@ mod tests {
     #[test]
     fn accepts_full_manifest() {
         let actual = ManifestFile::try_from(indoc! {"
+          path: manifest-path
+          shed: manifest-shed
           include:
             - manifest1
             - manifest2
           items:
-            - path: item1-path
-              shed: item1-shed
+            - item1-string
             - path: item2-path
               shed: item2-shed
               items:
@@ -40,30 +41,28 @@ mod tests {
         "})
         .unwrap();
         let expected = ManifestFile {
+            path: Some("manifest-path".into()),
+            shed: Some("manifest-shed".into()),
             include: ["manifest1", "manifest2"].map(String::from).into(),
             items: vec![
-                RootItem {
-                    path: "item1-path".into(),
-                    shed: Some("item1-shed".into()),
-                    items: None,
-                },
-                RootItem {
+                ItemKind::Path("item1-string".into()),
+                ItemKind::Item(Item {
                     path: "item2-path".into(),
                     shed: Some("item2-shed".into()),
                     items: Some(vec![
-                        ChildItem::Path("item2-string-item".into()),
-                        ChildItem::Item(Item {
+                        ItemKind::Path("item2-string-item".into()),
+                        ItemKind::Item(Item {
                             path: "item2-object-item-path".into(),
                             shed: Some("item2-object-item-shed".into()),
                             items: None,
                         }),
                     ]),
-                },
-                RootItem {
+                }),
+                ItemKind::Item(Item {
                     path: "item3-path".into(),
                     shed: None,
                     items: None,
-                },
+                }),
             ],
         };
 
@@ -88,7 +87,7 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "unknown field `bad`, expected `include` or `items`"
+            "unknown field `bad`, expected one of `path`, `shed`, `include`, `items`"
         );
     }
 
@@ -96,6 +95,8 @@ mod tests {
     fn accepts_empty_manifest() {
         let actual = ManifestFile::try_from("{}").unwrap();
         let expected = ManifestFile {
+            path: None,
+            shed: None,
             include: vec![],
             items: vec![],
         };
@@ -104,16 +105,13 @@ mod tests {
     }
 
     #[test]
-    fn rejects_bare_string_root_items() {
-        let res = ManifestFile::try_from(indoc! {"
+    fn accepts_bare_string_root_items() {
+        let actual = ManifestFile::try_from(indoc! {"
           items:
             - bare-string
-        "});
-        let error = res.expect_err("must error");
+        "})
+        .unwrap();
 
-        assert_eq!(
-            error.to_string(),
-            r#"items[0]: invalid type: string "bare-string", expected an object at line 2 column 5"#
-        );
+        assert_eq!(actual.items, vec![ItemKind::Path("bare-string".into())]);
     }
 }
