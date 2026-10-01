@@ -10,10 +10,10 @@ pub struct Manifest {
 }
 
 impl Manifest {
-    pub fn get(&self, indexes: &[usize]) -> Option<&Manifest> {
+    pub fn get(&self, indexes: &[usize]) -> &Manifest {
         indexes
             .iter()
-            .try_fold(self, |manifest, &index| manifest.manifests.get(index))
+            .fold(self, |manifest, &index| &manifest.manifests[index])
     }
 }
 
@@ -21,38 +21,35 @@ impl Manifest {
 mod tests {
     use super::*;
 
-    fn manifest(name: &str, manifests: Vec<Manifest>) -> Manifest {
-        Manifest {
-            name: name.into(),
-            path: PathBuf::from(name),
-            manifests,
-            items: Vec::new(),
-        }
-    }
-
     #[test]
     fn gets_manifest_at_indexes() {
-        let root = manifest(
-            "root",
-            vec![manifest(
-                "child",
-                vec![
-                    manifest("first", Vec::new()),
-                    manifest("second", Vec::new()),
+        let root = Manifest {
+            name: "root".into(),
+            path: PathBuf::from("root"),
+            manifests: vec![Manifest {
+                name: "child".into(),
+                path: PathBuf::from("child"),
+                manifests: vec![
+                    Manifest {
+                        name: "first".into(),
+                        path: PathBuf::from("first"),
+                        manifests: Vec::new(),
+                        items: Vec::new(),
+                    },
+                    Manifest {
+                        name: "second".into(),
+                        path: PathBuf::from("second"),
+                        manifests: Vec::new(),
+                        items: Vec::new(),
+                    },
                 ],
-            )],
-        );
+                items: Vec::new(),
+            }],
+            items: Vec::new(),
+        };
 
-        assert_eq!(root.get(&[]), Some(&root));
-        assert_eq!(
-            root.get(&[0]).map(|manifest| manifest.name.as_str()),
-            Some("child")
-        );
-        assert_eq!(
-            root.get(&[0, 1]).map(|manifest| manifest.name.as_str()),
-            Some("second")
-        );
-        assert_eq!(root.get(&[1]), None);
-        assert_eq!(root.get(&[0, 2]), None);
+        assert_eq!(root.get(&[]), &root);
+        assert_eq!(root.get(&[0]).name, "child");
+        assert_eq!(root.get(&[0, 1]).name, "second");
     }
 }

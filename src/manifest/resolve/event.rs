@@ -1,9 +1,10 @@
 use super::error::Error;
+use crate::manifest::Index;
 
 #[derive(Debug)]
 pub enum Event {
-    Started { index: Vec<usize> },
-    Resolved { index: Vec<usize> },
-    Error { index: Vec<usize>, error: Error },
+    Started { index: Index },
+    Resolved { index: Index },
+    Error { index: Index, error: Error },
     Done,
 }

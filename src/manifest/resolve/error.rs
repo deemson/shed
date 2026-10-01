@@ -1,3 +1,4 @@
+use crate::manifest::Index;
 use std::io;
 
 #[derive(Debug, thiserror::Error)]
@@ -18,5 +19,5 @@ pub enum Error {
     },
 
     #[error("include cycle detected")]
-    Cycle { start_index: Vec<usize> },
+    Cycle { start_index: Index },
 }

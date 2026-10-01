@@ -9,7 +9,7 @@ use tokio::sync::mpsc;
 use super::error::Error;
 use super::event::Event;
 use super::model::Manifest;
-use crate::manifest::ManifestFile;
+use crate::manifest::{Index, ManifestFile};
 
 #[derive(Clone)]
 pub struct Input {
@@ -46,7 +46,7 @@ impl Resolver {
     async fn resolve_manifest_files(
         &self,
         input_stack: Vec<Input>,
-        index: Vec<usize>,
+        index: Index,
         inputs: impl IntoIterator<Item = Input>,
     ) -> Vec<Manifest> {
         join_all(inputs.into_iter().enumerate().map(|(position, input)| {
@@ -60,7 +60,7 @@ impl Resolver {
     async fn resolve_manifest_file(
         &self,
         input_stack: Vec<Input>,
-        index: Vec<usize>,
+        index: Index,
         input: Input,
     ) -> Manifest {
         self.send_event(Event::Started {
@@ -125,7 +125,7 @@ impl Resolver {
     async fn resolve_manifest_file_include(
         &self,
         input_stack: Vec<Input>,
-        index: Vec<usize>,
+        index: Index,
         path: &Path,
         name: &str,
     ) -> Manifest {
@@ -193,7 +193,7 @@ impl Resolver {
         .await
     }
 
-    async fn error_resolution(&self, index: Vec<usize>, input: Input, error: Error) -> Manifest {
+    async fn error_resolution(&self, index: Index, input: Input, error: Error) -> Manifest {
         self.send_event(Event::Error { index, error }).await;
         Manifest {
             name: input.name,
