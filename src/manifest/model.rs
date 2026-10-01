@@ -1,14 +1,6 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-pub type Index = Vec<usize>;
-
-#[derive(Debug, Eq, Hash, PartialEq)]
-pub struct FullIndex {
-    pub manifest: Index,
-    pub item: Index,
-}
-
 #[derive(Debug, Deserialize, JsonSchema, Default, PartialEq)]
 #[serde(deny_unknown_fields, expecting = "an object")]
 pub struct ManifestFile {
