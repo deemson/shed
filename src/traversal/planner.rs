@@ -1,5 +1,6 @@
 use crate::manifest::{FullIndex as ManifestIndex, Manifest};
 
+use super::error::Error;
 use super::model::{Direction, NestedDirectory, NestedLeaf, Plan, Root, RootDirectory, RootLeaf};
 
 pub struct Planner {
@@ -334,6 +335,94 @@ mod tests {
                 }),
             ],
             errors: Vec::new(),
+        };
+
+        assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
+    async fn omits_overlapping_leaves_and_plans_unrelated_leaves_for_get() {
+        let path_dir = TempDir::new().unwrap();
+        let shed_dir = TempDir::new().unwrap();
+
+        let path_dir_display = path_dir.path().display();
+        let manifest_path = testing_m::write_yaml_manifest(
+            shed_dir.path(),
+            "manifest",
+            formatdoc! {"
+              items:
+                - path: {path_dir_display}/valid-leaf
+                  shed: valid-leaf
+                - path: {path_dir_display}/leaf
+                  shed: leaf1
+                - path: {path_dir_display}/leaf
+                  shed: leaf2
+            "},
+        );
+
+        let (manifests, resolve_events) = testing_m::resolve(vec![Input {
+            name: "manifest".into(),
+            path: manifest_path,
+        }])
+        .await;
+
+        testing_m::assert_events_contain_no_errors(&resolve_events);
+        testing_m::assert_events_contain_done_last(&resolve_events);
+
+        let actual = plan(Direction::Get, manifests);
+        let expected = Plan {
+            roots: vec![Root::Leaf(RootLeaf {
+                manifest_index: ([0], [0]).into(),
+                src: shed_dir.path().join("valid-leaf"),
+                dst: path_dir.path().join("valid-leaf"),
+            })],
+            errors: vec![Error::OverlappingLeaves {
+                manifest_indexes: [([0], [1]).into(), ([0], [2]).into()].into(),
+            }],
+        };
+
+        assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
+    async fn omits_ancestor_and_descendant_leaves_and_plans_unrelated_leaves_for_get() {
+        let path_dir = TempDir::new().unwrap();
+        let shed_dir = TempDir::new().unwrap();
+
+        let path_dir_display = path_dir.path().display();
+        let manifest_path = testing_m::write_yaml_manifest(
+            shed_dir.path(),
+            "manifest",
+            formatdoc! {"
+              items:
+                - path: {path_dir_display}/valid-leaf
+                  shed: valid-leaf
+                - path: {path_dir_display}/overlap
+                  shed: ancestor-leaf
+                - path: {path_dir_display}/overlap/descendant
+                  shed: descendant-leaf
+            "},
+        );
+
+        let (manifests, resolve_events) = testing_m::resolve(vec![Input {
+            name: "manifest".into(),
+            path: manifest_path,
+        }])
+        .await;
+
+        testing_m::assert_events_contain_no_errors(&resolve_events);
+        testing_m::assert_events_contain_done_last(&resolve_events);
+
+        let actual = plan(Direction::Get, manifests);
+        let expected = Plan {
+            roots: vec![Root::Leaf(RootLeaf {
+                manifest_index: ([0], [0]).into(),
+                src: shed_dir.path().join("valid-leaf"),
+                dst: path_dir.path().join("valid-leaf"),
+            })],
+            errors: vec![Error::OverlappingLeaves {
+                manifest_indexes: [([0], [1]).into(), ([0], [2]).into()].into(),
+            }],
         };
 
         assert_eq!(actual, expected);
