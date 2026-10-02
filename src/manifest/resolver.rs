@@ -6,10 +6,9 @@ use std::{
 use futures::future::join_all;
 use tokio::sync::mpsc;
 
-use super::error::Error;
-use super::event::Event;
-use super::model::Manifest;
-use crate::manifest::{Index, ManifestFile};
+use super::{
+    error::Error, event::Event, index::Index, model::Manifest, yaml::Manifest as UnresolvedManifest,
+};
 
 #[derive(Clone)]
 pub struct Input {
@@ -87,7 +86,7 @@ impl Resolver {
             }
         };
 
-        let manifest_file = match ManifestFile::try_from(content) {
+        let unresolved_manifest = match UnresolvedManifest::try_from(content) {
             Ok(manifest_file) => manifest_file,
             Err(source) => {
                 return self
@@ -96,12 +95,12 @@ impl Resolver {
             }
         };
 
-        let ManifestFile {
+        let UnresolvedManifest {
             path: manifest_path,
             shed,
             include,
             items,
-        } = manifest_file;
+        } = unresolved_manifest;
 
         let mut input_stack = input_stack;
         input_stack.push(input.clone());
@@ -219,8 +218,10 @@ impl Resolver {
 
 #[cfg(test)]
 mod tests {
-    use crate::manifest::{Item, ItemKind, resolve::testing::*};
-
+    use super::super::{
+        testing::*,
+        yaml::{Item, ItemKind},
+    };
     use super::*;
 
     use indoc::indoc;

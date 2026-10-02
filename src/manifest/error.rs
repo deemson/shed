@@ -1,4 +1,4 @@
-use crate::manifest::Index;
+use super::index::Index;
 use std::io;
 
 #[derive(Debug, thiserror::Error)]

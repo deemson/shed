@@ -1,6 +1,6 @@
-use super::model::ManifestFile;
+use super::model::Manifest;
 
-impl TryFrom<&str> for ManifestFile {
+impl TryFrom<&str> for Manifest {
     type Error = yaml_serde::Error;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
@@ -8,22 +8,23 @@ impl TryFrom<&str> for ManifestFile {
     }
 }
 
-impl TryFrom<String> for ManifestFile {
+impl TryFrom<String> for Manifest {
     type Error = yaml_serde::Error;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        ManifestFile::try_from(value.as_str())
+        Manifest::try_from(value.as_str())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::model::*;
+    use super::super::{Item, ItemKind};
+    use super::*;
     use indoc::indoc;
 
     #[test]
     fn accepts_full_manifest() {
-        let actual = ManifestFile::try_from(indoc! {"
+        let actual = Manifest::try_from(indoc! {"
           path: manifest-path
           shed: manifest-shed
           include:
@@ -40,7 +41,7 @@ mod tests {
             - path: item3-path
         "})
         .unwrap();
-        let expected = ManifestFile {
+        let expected = Manifest {
             path: Some("manifest-path".into()),
             shed: Some("manifest-shed".into()),
             include: ["manifest1", "manifest2"].map(String::from).into(),
@@ -71,7 +72,7 @@ mod tests {
 
     #[test]
     fn rejects_non_object_manifest() {
-        let res = ManifestFile::try_from("bad");
+        let res = Manifest::try_from("bad");
         let error = res.expect_err("must error");
 
         assert_eq!(
@@ -82,7 +83,7 @@ mod tests {
 
     #[test]
     fn rejects_unknown_fields() {
-        let res = ManifestFile::try_from("bad: value");
+        let res = Manifest::try_from("bad: value");
         let error = res.expect_err("must error");
 
         assert_eq!(
@@ -93,8 +94,8 @@ mod tests {
 
     #[test]
     fn accepts_empty_manifest() {
-        let actual = ManifestFile::try_from("{}").unwrap();
-        let expected = ManifestFile {
+        let actual = Manifest::try_from("{}").unwrap();
+        let expected = Manifest {
             path: None,
             shed: None,
             include: vec![],
@@ -106,7 +107,7 @@ mod tests {
 
     #[test]
     fn accepts_bare_string_root_items() {
-        let actual = ManifestFile::try_from(indoc! {"
+        let actual = Manifest::try_from(indoc! {"
           items:
             - bare-string
         "})
