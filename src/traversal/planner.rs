@@ -427,4 +427,53 @@ mod tests {
 
         assert_eq!(actual, expected);
     }
+
+    #[tokio::test]
+    async fn omits_non_root_items_with_absolute_path_and_shed_and_plans_unrelated_items_for_get() {
+        let path_dir = TempDir::new().unwrap();
+        let shed_dir = TempDir::new().unwrap();
+
+        let path_dir_display = path_dir.path().display();
+        let shed_dir_display = shed_dir.path().display();
+        let manifest_path = testing_m::write_yaml_manifest(
+            shed_dir.path(),
+            "manifest",
+            formatdoc! {"
+              items:
+                - path: {path_dir_display}
+                  items:
+                    - valid-leaf
+                    - path: {path_dir_display}/invalid-leaf
+                      shed: {shed_dir_display}/invalid-leaf
+            "},
+        );
+
+        let (manifests, resolve_events) = testing_m::resolve(vec![Input {
+            name: "manifest".into(),
+            path: manifest_path,
+        }])
+        .await;
+
+        testing_m::assert_events_contain_no_errors(&resolve_events);
+        testing_m::assert_events_contain_done_last(&resolve_events);
+
+        let actual = plan(Direction::Get, manifests);
+        let expected = Plan {
+            roots: vec![Root::Directory(RootDirectory {
+                manifest_indexes: [([0], [0]).into()].into(),
+                dst: path_dir.path().into(),
+                directories: Vec::new(),
+                leaves: vec![NestedLeaf {
+                    manifest_index: ([0], [0, 0]).into(),
+                    src: shed_dir.path().join("valid-leaf"),
+                    dst: "valid-leaf".into(),
+                }],
+            })],
+            errors: vec![Error::NonRootPathShedBothAbsolute {
+                manifest_index: ([0], [0, 1]).into(),
+            }],
+        };
+
+        assert_eq!(actual, expected);
+    }
 }
