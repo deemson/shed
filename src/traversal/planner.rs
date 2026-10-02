@@ -1,4 +1,6 @@
-use crate::manifest::{FullIndex as ManifestIndex, Manifest};
+use std::path::PathBuf;
+
+use crate::manifest::{FullIndex as ManifestIndex, ItemKind, Manifest};
 
 use super::error::Error;
 use super::model::{Direction, NestedDirectory, NestedLeaf, Plan, Root, RootDirectory, RootLeaf};
@@ -111,6 +113,10 @@ mod tests {
                   shed: leaf2
             "},
         );
+        let manifest_directory = manifest_path
+            .parent()
+            .expect("a manifest path has a parent")
+            .to_path_buf();
 
         let (manifests, resolve_events) = testing_m::resolve(vec![Input {
             name: "manifest".into(),
@@ -126,12 +132,12 @@ mod tests {
             roots: vec![
                 Root::Leaf(RootLeaf {
                     manifest_index: ([0], [0]).into(),
-                    src: shed_dir.path().join("leaf1"),
+                    src: manifest_directory.join("leaf1"),
                     dst: path_dir.path().join("leaf1"),
                 }),
                 Root::Leaf(RootLeaf {
                     manifest_index: ([0], [1]).into(),
-                    src: shed_dir.path().join("leaf2"),
+                    src: manifest_directory.join("leaf2"),
                     dst: path_dir.path().join("leaf2"),
                 }),
             ],
