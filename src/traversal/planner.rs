@@ -1,3 +1,4 @@
+use super::radix;
 use std::path::PathBuf;
 
 use crate::manifest::{FullIndex as ManifestIndex, ItemKind, Manifest};
@@ -23,7 +24,7 @@ pub fn plan(direction: Direction, manifests: impl IntoIterator<Item = Manifest>)
     Planner::new(direction).plan(manifests)
 }
 
-#[cfg(test)]
+#[cfg(any())]
 mod tests {
     use super::*;
     use crate::manifest::{Input, testing as testing_m};

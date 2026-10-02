@@ -117,29 +117,29 @@ mod tests {
     fn radix_indexes_paths_and_queries_their_relationships() {
         // Path keys are split on path components, not bytes. This is the shape the
         // planner can use to detect exact, ancestor, and descendant destinations.
-        let mut paths: Radix<OsString, &str> = Radix::new();
-        paths.insert(Path::new("home/alice"), "home");
-        paths.insert(Path::new("home/alice/.config"), "config");
-        paths.insert(Path::new("home/alice/.config/fish"), "fish");
-        paths.insert(Path::new("home/alice/.config/nvim"), "nvim");
-        paths.insert(Path::new("home/alice-old"), "sibling");
+        let mut radix: Radix<OsString, &str> = Radix::new();
+        radix.insert(Path::new("home/alice"), "home");
+        radix.insert(Path::new("home/alice/.config"), "config");
+        radix.insert(Path::new("home/alice/.config/fish"), "fish");
+        radix.insert(Path::new("home/alice/.config/nvim"), "nvim");
+        radix.insert(Path::new("home/alice-old"), "sibling");
 
         // Exact lookup.
-        assert_eq!(paths.get(Path::new("home/alice/.config")), Some(&"config"));
+        assert_eq!(radix.get(Path::new("home/alice/.config")), Some(&"config"));
 
         // Longest-prefix lookup finds the nearest planned ancestor.
         assert_eq!(
-            paths.get_ancestor(Path::new("home/alice/.config/nvim/init.lua")),
+            radix.get_ancestor(Path::new("home/alice/.config/nvim/init.lua")),
             Some(&"nvim")
         );
         assert_eq!(
-            paths.strict_ancestor(Path::new("home/alice/.config/nvim")),
+            radix.strict_ancestor(Path::new("home/alice/.config/nvim")),
             Some(&"config")
         );
 
         // Descendant queries are strict and returned in path order.
         assert_eq!(
-            paths
+            radix
                 .descendants(Path::new("home/alice/.config"))
                 .copied()
                 .collect::<Vec<_>>(),
@@ -148,16 +148,25 @@ mod tests {
 
         // Component-aware matching does not treat `alice` as a prefix of
         // `alice-old`, unlike a byte-prefix data structure.
-        assert_eq!(paths.strict_ancestor(Path::new("home/alice-old")), None);
+        assert_eq!(radix.strict_ancestor(Path::new("home/alice-old")), None);
 
         // Cloning creates an isolated, copy-on-write snapshot. Prefix deletion
         // mutates only the live trie and removes the key plus all descendants.
-        let snapshot = paths.clone();
-        assert_eq!(paths.delete_prefix(Path::new("home/alice/.config")), 3);
-        assert_eq!(paths.get(Path::new("home/alice/.config")), None);
+        let snapshot = radix.clone();
+        assert_eq!(radix.delete_prefix(Path::new("home/alice/.config")), 3);
+        assert_eq!(radix.get(Path::new("home/alice/.config")), None);
         assert_eq!(
             snapshot.get(Path::new("home/alice/.config/nvim")),
             Some(&"nvim")
         );
+    }
+
+    #[test]
+    fn some() {
+        let mut radix: Radix<OsString, &str> = Radix::new();
+        radix.insert(Path::new("/home/alice/.config/nvim"), "nvim");
+        radix.insert(Path::new("/home/alice/.config"), "config");
+        let w: Vec<_> = radix.walk_prefix(Path::new("/home")).collect();
+        dbg!(&w);
     }
 }
