@@ -1,9 +1,16 @@
+use super::error::Error;
 use crate::manifest::FullIndex as ManifestIndex;
 use std::{collections::HashSet, ffi::OsString, path::PathBuf};
 
 pub enum Direction {
     Put,
     Get,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Plan {
+    pub roots: Vec<Root>,
+    pub errors: Vec<Error>,
 }
 
 #[derive(Debug, PartialEq)]

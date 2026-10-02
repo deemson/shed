@@ -1,6 +1,6 @@
 use crate::manifest::{FullIndex as ManifestIndex, Manifest};
 
-use super::model::{Direction, NestedDirectory, NestedLeaf, Root, RootDirectory, RootLeaf};
+use super::model::{Direction, NestedDirectory, NestedLeaf, Plan, Root, RootDirectory, RootLeaf};
 
 pub struct Planner {
     direction: Direction,
@@ -11,12 +11,12 @@ impl Planner {
         Self { direction }
     }
 
-    pub fn plan(&self, manifests: impl IntoIterator<Item = Manifest>) -> Vec<Root> {
+    pub fn plan(&self, manifests: impl IntoIterator<Item = Manifest>) -> Plan {
         todo!()
     }
 }
 
-pub fn plan(direction: Direction, manifests: impl IntoIterator<Item = Manifest>) -> Vec<Root> {
+pub fn plan(direction: Direction, manifests: impl IntoIterator<Item = Manifest>) -> Plan {
     Planner::new(direction).plan(manifests)
 }
 
@@ -59,33 +59,36 @@ mod tests {
         testing_m::assert_events_contain_done_last(&resolve_events);
 
         let actual = plan(Direction::Get, manifests);
-        let expected = vec![Root::Directory(RootDirectory {
-            manifest_indexes: [([0], [0]).into()].into(),
-            dst: path_dir.path().into(),
-            directories: vec![NestedDirectory {
-                manifest_indexes: [([0], [0, 0]).into()].into(),
-                dst: "dir1".into(),
+        let expected = Plan {
+            roots: vec![Root::Directory(RootDirectory {
+                manifest_indexes: [([0], [0]).into()].into(),
+                dst: path_dir.path().into(),
                 directories: vec![NestedDirectory {
-                    manifest_indexes: [([0], [0, 0, 0]).into()].into(),
-                    dst: "dir2".into(),
-                    directories: Vec::new(),
-                    leaves: vec![
-                        NestedLeaf {
-                            manifest_index: ([0], [0, 0, 0, 0]).into(),
-                            src: shed_dir.path().join("dir1/dir2/leaf1"),
-                            dst: "leaf1".into(),
-                        },
-                        NestedLeaf {
-                            manifest_index: ([0], [0, 0, 0, 1]).into(),
-                            src: shed_dir.path().join("dir1/dir2/leaf2"),
-                            dst: "leaf2".into(),
-                        },
-                    ],
+                    manifest_indexes: [([0], [0, 0]).into()].into(),
+                    dst: "dir1".into(),
+                    directories: vec![NestedDirectory {
+                        manifest_indexes: [([0], [0, 0, 0]).into()].into(),
+                        dst: "dir2".into(),
+                        directories: Vec::new(),
+                        leaves: vec![
+                            NestedLeaf {
+                                manifest_index: ([0], [0, 0, 0, 0]).into(),
+                                src: shed_dir.path().join("dir1/dir2/leaf1"),
+                                dst: "leaf1".into(),
+                            },
+                            NestedLeaf {
+                                manifest_index: ([0], [0, 0, 0, 1]).into(),
+                                src: shed_dir.path().join("dir1/dir2/leaf2"),
+                                dst: "leaf2".into(),
+                            },
+                        ],
+                    }],
+                    leaves: Vec::new(),
                 }],
                 leaves: Vec::new(),
-            }],
-            leaves: Vec::new(),
-        })];
+            })],
+            errors: Vec::new(),
+        };
 
         assert_eq!(actual, expected);
     }
@@ -118,18 +121,21 @@ mod tests {
         testing_m::assert_events_contain_done_last(&resolve_events);
 
         let actual = plan(Direction::Get, manifests);
-        let expected = vec![
-            Root::Leaf(RootLeaf {
-                manifest_index: ([0], [0]).into(),
-                src: shed_dir.path().join("leaf1"),
-                dst: path_dir.path().join("leaf1"),
-            }),
-            Root::Leaf(RootLeaf {
-                manifest_index: ([0], [1]).into(),
-                src: shed_dir.path().join("leaf2"),
-                dst: path_dir.path().join("leaf2"),
-            }),
-        ];
+        let expected = Plan {
+            roots: vec![
+                Root::Leaf(RootLeaf {
+                    manifest_index: ([0], [0]).into(),
+                    src: shed_dir.path().join("leaf1"),
+                    dst: path_dir.path().join("leaf1"),
+                }),
+                Root::Leaf(RootLeaf {
+                    manifest_index: ([0], [1]).into(),
+                    src: shed_dir.path().join("leaf2"),
+                    dst: path_dir.path().join("leaf2"),
+                }),
+            ],
+            errors: Vec::new(),
+        };
 
         assert_eq!(actual, expected);
     }
@@ -161,23 +167,26 @@ mod tests {
         testing_m::assert_events_contain_done_last(&resolve_events);
 
         let actual = plan(Direction::Get, manifests);
-        let expected = vec![Root::Directory(RootDirectory {
-            manifest_indexes: [([0], []).into()].into(),
-            dst: path_dir.path().into(),
-            directories: Vec::new(),
-            leaves: vec![
-                NestedLeaf {
-                    manifest_index: ([0], [0]).into(),
-                    src: shed_dir.path().join("leaf1"),
-                    dst: "leaf1".into(),
-                },
-                NestedLeaf {
-                    manifest_index: ([0], [1]).into(),
-                    src: shed_dir.path().join("leaf2"),
-                    dst: "leaf2".into(),
-                },
-            ],
-        })];
+        let expected = Plan {
+            roots: vec![Root::Directory(RootDirectory {
+                manifest_indexes: [([0], []).into()].into(),
+                dst: path_dir.path().into(),
+                directories: Vec::new(),
+                leaves: vec![
+                    NestedLeaf {
+                        manifest_index: ([0], [0]).into(),
+                        src: shed_dir.path().join("leaf1"),
+                        dst: "leaf1".into(),
+                    },
+                    NestedLeaf {
+                        manifest_index: ([0], [1]).into(),
+                        src: shed_dir.path().join("leaf2"),
+                        dst: "leaf2".into(),
+                    },
+                ],
+            })],
+            errors: Vec::new(),
+        };
 
         assert_eq!(actual, expected);
     }
@@ -226,30 +235,33 @@ mod tests {
         testing_m::assert_events_contain_done_last(&resolve_events);
 
         let actual = plan(Direction::Get, manifests);
-        let expected = vec![Root::Directory(RootDirectory {
-            manifest_indexes: [([0, 0], []).into(), ([0, 1], []).into()].into(),
-            dst: path_dir.path().into(),
-            directories: vec![NestedDirectory {
-                manifest_indexes: [([0, 0], []).into()].into(),
-                dst: "sub-dir1".into(),
+        let expected = Plan {
+            roots: vec![Root::Directory(RootDirectory {
+                manifest_indexes: [([0, 0], []).into(), ([0, 1], []).into()].into(),
+                dst: path_dir.path().into(),
                 directories: vec![NestedDirectory {
                     manifest_indexes: [([0, 0], []).into()].into(),
-                    dst: "sub-dir2".into(),
-                    directories: Vec::new(),
-                    leaves: vec![NestedLeaf {
-                        manifest_index: ([0, 0], [0]).into(),
-                        src: shed_dir.path().join("sub-dir-leaf"),
-                        dst: "sub-dir-leaf".into(),
+                    dst: "sub-dir1".into(),
+                    directories: vec![NestedDirectory {
+                        manifest_indexes: [([0, 0], []).into()].into(),
+                        dst: "sub-dir2".into(),
+                        directories: Vec::new(),
+                        leaves: vec![NestedLeaf {
+                            manifest_index: ([0, 0], [0]).into(),
+                            src: shed_dir.path().join("sub-dir-leaf"),
+                            dst: "sub-dir-leaf".into(),
+                        }],
                     }],
+                    leaves: Vec::new(),
                 }],
-                leaves: Vec::new(),
-            }],
-            leaves: vec![NestedLeaf {
-                manifest_index: ([0, 1], [0]).into(),
-                src: shed_dir.path().join("top-leaf"),
-                dst: "top-leaf".into(),
-            }],
-        })];
+                leaves: vec![NestedLeaf {
+                    manifest_index: ([0, 1], [0]).into(),
+                    src: shed_dir.path().join("top-leaf"),
+                    dst: "top-leaf".into(),
+                }],
+            })],
+            errors: Vec::new(),
+        };
 
         assert_eq!(actual, expected);
     }
@@ -298,28 +310,31 @@ mod tests {
         testing_m::assert_events_contain_done_last(&resolve_events);
 
         let actual = plan(Direction::Get, manifests);
-        let expected = vec![
-            Root::Directory(RootDirectory {
-                manifest_indexes: [([0, 0], []).into()].into(),
-                dst: path_dir.path().join("sub-dir1"),
-                directories: Vec::new(),
-                leaves: vec![NestedLeaf {
-                    manifest_index: ([0, 0], [0]).into(),
-                    src: shed_dir.path().join("sub-dir1-leaf"),
-                    dst: "sub-dir1-leaf".into(),
-                }],
-            }),
-            Root::Directory(RootDirectory {
-                manifest_indexes: [([0, 1], []).into()].into(),
-                dst: path_dir.path().join("sub-dir2"),
-                directories: Vec::new(),
-                leaves: vec![NestedLeaf {
-                    manifest_index: ([0, 1], [0]).into(),
-                    src: shed_dir.path().join("sub-dir2-leaf"),
-                    dst: "sub-dir2-leaf".into(),
-                }],
-            }),
-        ];
+        let expected = Plan {
+            roots: vec![
+                Root::Directory(RootDirectory {
+                    manifest_indexes: [([0, 0], []).into()].into(),
+                    dst: path_dir.path().join("sub-dir1"),
+                    directories: Vec::new(),
+                    leaves: vec![NestedLeaf {
+                        manifest_index: ([0, 0], [0]).into(),
+                        src: shed_dir.path().join("sub-dir1-leaf"),
+                        dst: "sub-dir1-leaf".into(),
+                    }],
+                }),
+                Root::Directory(RootDirectory {
+                    manifest_indexes: [([0, 1], []).into()].into(),
+                    dst: path_dir.path().join("sub-dir2"),
+                    directories: Vec::new(),
+                    leaves: vec![NestedLeaf {
+                        manifest_index: ([0, 1], [0]).into(),
+                        src: shed_dir.path().join("sub-dir2-leaf"),
+                        dst: "sub-dir2-leaf".into(),
+                    }],
+                }),
+            ],
+            errors: Vec::new(),
+        };
 
         assert_eq!(actual, expected);
     }
