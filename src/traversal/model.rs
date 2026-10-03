@@ -1,7 +1,8 @@
 use super::error::Error;
-use crate::manifest::FullIndex as ManifestIndex;
-use std::{collections::HashSet, ffi::OsString, path::PathBuf};
+use crate::manifest::FullIndex;
+use std::{ffi::OsString, path::PathBuf};
 
+#[derive(Clone)]
 pub enum Direction {
     Put,
     Get,
@@ -15,36 +16,28 @@ pub struct Plan {
 
 #[derive(Debug, PartialEq)]
 pub enum Root {
-    Directory(RootDirectory),
-    Leaf(RootLeaf),
+    Directory {
+        dst: PathBuf,
+        directories: Vec<Directory>,
+        leaves: Vec<Leaf>,
+    },
+    Leaf {
+        index: FullIndex,
+        src: PathBuf,
+        dst: PathBuf,
+    },
 }
 
 #[derive(Debug, PartialEq)]
-pub struct RootDirectory {
-    pub manifest_indexes: HashSet<ManifestIndex>,
-    pub dst: PathBuf,
-    pub directories: Vec<NestedDirectory>,
-    pub leaves: Vec<NestedLeaf>,
-}
-
-#[derive(Debug, PartialEq)]
-pub struct RootLeaf {
-    pub manifest_index: ManifestIndex,
-    pub src: PathBuf,
-    pub dst: PathBuf,
-}
-
-#[derive(Debug, PartialEq)]
-pub struct NestedDirectory {
-    pub manifest_indexes: HashSet<ManifestIndex>,
+pub struct Directory {
     pub dst: OsString,
-    pub directories: Vec<NestedDirectory>,
-    pub leaves: Vec<NestedLeaf>,
+    pub directories: Vec<Directory>,
+    pub leaves: Vec<Leaf>,
 }
 
 #[derive(Debug, PartialEq)]
-pub struct NestedLeaf {
-    pub manifest_index: ManifestIndex,
+pub struct Leaf {
+    pub index: FullIndex,
     pub src: PathBuf,
     pub dst: OsString,
 }
