@@ -14,14 +14,14 @@ impl Planner {
         Self { direction }
     }
 
-    pub fn plan(&self, manifests: impl IntoIterator<Item = Manifest>) -> Plan {
+    pub fn plan(&self, manifests: &[Manifest]) -> Plan {
         let radix_plan = radix::Planner::new(self.direction.clone()).plan(manifests);
         let _ = radix_plan;
         todo!()
     }
 }
 
-pub fn plan(direction: Direction, manifests: impl IntoIterator<Item = Manifest>) -> Plan {
+pub fn plan(direction: Direction, manifests: &[Manifest]) -> Plan {
     Planner::new(direction).plan(manifests)
 }
 
@@ -64,7 +64,7 @@ mod tests {
         testing_m::assert_events_contain_no_errors(&resolve_events);
         testing_m::assert_events_contain_done_last(&resolve_events);
 
-        let actual = plan(Direction::Get, manifests);
+        let actual = plan(Direction::Get, &manifests);
         let expected = Plan {
             roots: vec![
                 Root::Leaf {
@@ -120,7 +120,7 @@ mod tests {
         testing_m::assert_events_contain_no_errors(&resolve_events);
         testing_m::assert_events_contain_done_last(&resolve_events);
 
-        let actual = plan(Direction::Get, manifests);
+        let actual = plan(Direction::Get, &manifests);
         let expected = Plan {
             roots: vec![Root::Directory {
                 dst: path_dir,
@@ -183,7 +183,7 @@ mod tests {
         testing_m::assert_events_contain_no_errors(&resolve_events);
         testing_m::assert_events_contain_done_last(&resolve_events);
 
-        let actual = plan(Direction::Get, manifests);
+        let actual = plan(Direction::Get, &manifests);
         let expected = Plan {
             roots: vec![Root::Directory {
                 dst: path_dir,
@@ -255,7 +255,7 @@ mod tests {
         testing_m::assert_events_contain_no_errors(&resolve_events);
         testing_m::assert_events_contain_done_last(&resolve_events);
 
-        let actual = plan(Direction::Get, manifests);
+        let actual = plan(Direction::Get, &manifests);
         let expected = Plan {
             roots: vec![Root::Directory {
                 dst: path_dir,
@@ -332,7 +332,7 @@ mod tests {
         testing_m::assert_events_contain_no_errors(&resolve_events);
         testing_m::assert_events_contain_done_last(&resolve_events);
 
-        let actual = plan(Direction::Get, manifests);
+        let actual = plan(Direction::Get, &manifests);
         let expected = Plan {
             roots: vec![
                 Root::Directory {
@@ -394,7 +394,7 @@ mod tests {
         testing_m::assert_events_contain_no_errors(&resolve_events);
         testing_m::assert_events_contain_done_last(&resolve_events);
 
-        let actual = plan(Direction::Get, manifests);
+        let actual = plan(Direction::Get, &manifests);
         let expected = Plan {
             roots: vec![Root::Leaf {
                 index: ([0], [0]).into(),
@@ -443,7 +443,7 @@ mod tests {
         testing_m::assert_events_contain_no_errors(&resolve_events);
         testing_m::assert_events_contain_done_last(&resolve_events);
 
-        let actual = plan(Direction::Get, manifests);
+        let actual = plan(Direction::Get, &manifests);
         let expected = Plan {
             roots: vec![Root::Leaf {
                 index: ([0], [0]).into(),
@@ -492,7 +492,7 @@ mod tests {
         testing_m::assert_events_contain_no_errors(&resolve_events);
         testing_m::assert_events_contain_done_last(&resolve_events);
 
-        let actual = plan(Direction::Get, manifests);
+        let actual = plan(Direction::Get, &manifests);
         let expected = Plan {
             roots: vec![Root::Directory {
                 dst: path_dir,
