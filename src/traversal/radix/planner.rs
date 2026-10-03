@@ -1,7 +1,6 @@
 use crate::manifest::Manifest;
 
-use super::super::model::Direction;
-use super::model::Plan;
+use super::super::model::{Direction, Plan};
 
 pub(in crate::traversal) struct Planner {
     direction: Direction,
@@ -12,10 +11,7 @@ impl Planner {
         Self { direction }
     }
 
-    pub fn plan(
-        &self,
-        manifests: impl IntoIterator<Item = Manifest>,
-    ) -> Plan {
+    pub fn plan(&self, manifests: &[Manifest]) -> Plan {
         todo!()
     }
 }
