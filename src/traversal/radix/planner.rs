@@ -2,7 +2,7 @@ use super::super::{
     error::Error,
     model::{Direction, Leaf},
 };
-use super::model::Plan;
+use super::model::{Entry, Plan};
 use crate::manifest::{FullIndex, Index, Item, ItemKind, Manifest};
 use std::path::{Path, PathBuf};
 
@@ -50,6 +50,13 @@ impl Planner {
 
         self.plan_manifests(plan, index.clone(), &manifest.manifests);
 
+        let dst_root = if manifest.path.is_some() || manifest.shed.is_some() {
+            let (_, dst) = self.direction.resolve(path.clone(), shed.clone());
+            Some(dst)
+        } else {
+            None
+        };
+
         self.plan_item_kinds(
             plan,
             FullIndex {
@@ -58,6 +65,7 @@ impl Planner {
             },
             &path,
             &shed,
+            dst_root.as_deref(),
             &manifest.items,
         );
     }
@@ -68,6 +76,7 @@ impl Planner {
         index_parent: FullIndex,
         path_parent: &Path,
         shed_parent: &Path,
+        dst_root: Option<&Path>,
         item_kinds: &[ItemKind],
     ) {
         for (position, item_kind) in item_kinds.iter().enumerate() {
@@ -80,7 +89,7 @@ impl Planner {
 
             match item_kind {
                 ItemKind::Item(item) => {
-                    self.plan_item(plan, index, path_parent, shed_parent, item);
+                    self.plan_item(plan, index, path_parent, shed_parent, dst_root, item);
                 }
                 ItemKind::Path(path) => {
                     let bare_item = Item {
@@ -89,7 +98,7 @@ impl Planner {
                         items: None,
                     };
 
-                    self.plan_item(plan, index, path_parent, shed_parent, &bare_item);
+                    self.plan_item(plan, index, path_parent, shed_parent, dst_root, &bare_item);
                 }
             }
         }
@@ -101,6 +110,7 @@ impl Planner {
         index: FullIndex,
         path_parent: &Path,
         shed_parent: &Path,
+        dst_root: Option<&Path>,
         item: &Item,
     ) {
         let path_is_absolute = Path::new(&item.path).is_absolute();
@@ -123,7 +133,15 @@ impl Planner {
         };
 
         if let Some(children) = &item.items {
-            self.plan_item_kinds(plan, index, &path, &shed, children);
+            let child_dst_root = match dst_root {
+                Some(dst_root) => dst_root.to_path_buf(),
+                None => {
+                    let (_, dst) = self.direction.resolve(path.clone(), shed.clone());
+                    dst
+                }
+            };
+
+            self.plan_item_kinds(plan, index, &path, &shed, Some(&child_dst_root), children);
         } else {
             let (src, dst) = self.direction.resolve(path, shed);
 
@@ -138,9 +156,12 @@ impl Planner {
                 dst: dst_name,
             };
 
-            let mut leaves = plan.radix.get(&dst).cloned().unwrap_or_default();
-            leaves.push(leaf);
-            plan.radix.insert(&dst, leaves);
+            let mut entries = plan.radix.get(&dst).cloned().unwrap_or_default();
+            entries.push(Entry {
+                dst_root: dst_root.map(Path::to_path_buf),
+                leaf,
+            });
+            plan.radix.insert(&dst, entries);
         }
     }
 }

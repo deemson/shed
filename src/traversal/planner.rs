@@ -4,25 +4,10 @@ use super::{
     radix,
 };
 use crate::manifest::Manifest;
-
-pub struct Planner {
-    direction: Direction,
-}
-
-impl Planner {
-    pub fn new(direction: Direction) -> Self {
-        Self { direction }
-    }
-
-    pub fn plan(&self, manifests: &[Manifest]) -> Plan {
-        let radix_plan = radix::Planner::new(self.direction.clone()).plan(manifests);
-        let _ = radix_plan;
-        todo!()
-    }
-}
+use std::{collections::HashSet, path::PathBuf};
 
 pub fn plan(direction: Direction, manifests: &[Manifest]) -> Plan {
-    Planner::new(direction).plan(manifests)
+    todo!()
 }
 
 #[cfg(test)]
@@ -78,6 +63,61 @@ mod tests {
                     dst: path_dir.join("leaf2"),
                 },
             ],
+            errors: Vec::new(),
+        };
+
+        assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
+    async fn plans_bare_leaves_under_a_manifest_level_path_for_put() {
+        let temp_dir = TempDir::new().unwrap();
+        let path_dir = temp_dir.path().join("path");
+        let shed_dir = temp_dir.path().join("shed");
+
+        let path_dir_display = path_dir.display();
+        let manifest_path = testing_m::write_yaml_manifest(
+            &shed_dir,
+            "manifest",
+            formatdoc! {"
+              path: {path_dir_display}
+              items:
+                - leaf1
+                - leaf2
+            "},
+        );
+        let manifest_directory = manifest_path
+            .parent()
+            .expect("a manifest path has a parent")
+            .to_path_buf();
+
+        let (manifests, resolve_events) = testing_m::resolve(vec![Input {
+            name: "manifest".into(),
+            path: manifest_path,
+        }])
+        .await;
+
+        testing_m::assert_events_contain_no_errors(&resolve_events);
+        testing_m::assert_events_contain_done_last(&resolve_events);
+
+        let actual = plan(Direction::Put, &manifests);
+        let expected = Plan {
+            roots: vec![Root::Directory {
+                dst: manifest_directory,
+                directories: Vec::new(),
+                leaves: vec![
+                    Leaf {
+                        index: ([0], [0]).into(),
+                        src: path_dir.join("leaf1"),
+                        dst: "leaf1".into(),
+                    },
+                    Leaf {
+                        index: ([0], [1]).into(),
+                        src: path_dir.join("leaf2"),
+                        dst: "leaf2".into(),
+                    },
+                ],
+            }],
             errors: Vec::new(),
         };
 
