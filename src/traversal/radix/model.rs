@@ -1,5 +1,9 @@
-use super::super::model::Leaf;
+use super::super::{error::Error, model::Leaf};
 use iradix::unsync::Radix;
 use std::ffi::OsString;
 
-pub(in crate::traversal) type Plan = Radix<OsString, Vec<Leaf>>;
+#[derive(Default)]
+pub(in crate::traversal) struct Plan {
+    pub radix: Radix<OsString, Vec<Leaf>>,
+    pub errors: Vec<Error>,
+}

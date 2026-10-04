@@ -1,4 +1,7 @@
-use super::super::model::{Direction, Leaf};
+use super::super::{
+    error::Error,
+    model::{Direction, Leaf},
+};
 use super::model::Plan;
 use crate::manifest::{FullIndex, Index, Item, ItemKind, Manifest};
 use std::path::{Path, PathBuf};
@@ -13,7 +16,7 @@ impl Planner {
     }
 
     pub fn plan(&self, manifests: &[Manifest]) -> Plan {
-        let mut plan = Plan::new();
+        let mut plan = Plan::default();
         self.plan_manifests(&mut plan, Vec::new(), manifests);
         plan
     }
@@ -100,6 +103,18 @@ impl Planner {
         shed_parent: &Path,
         item: &Item,
     ) {
+        let path_is_absolute = Path::new(&item.path).is_absolute();
+        let shed_is_absolute = item
+            .shed
+            .as_deref()
+            .is_some_and(|shed| Path::new(shed).is_absolute());
+
+        if index.item.len() > 1 && path_is_absolute && shed_is_absolute {
+            plan.errors
+                .push(Error::NonRootPathShedBothAbsolute { index });
+            return;
+        }
+
         let path = path_parent.join(&item.path);
         let shed = match &item.shed {
             Some(shed) => shed_parent.join(shed),
@@ -123,9 +138,9 @@ impl Planner {
                 dst: dst_name,
             };
 
-            let mut leaves = plan.get(&dst).cloned().unwrap_or_default();
+            let mut leaves = plan.radix.get(&dst).cloned().unwrap_or_default();
             leaves.push(leaf);
-            plan.insert(&dst, leaves);
+            plan.radix.insert(&dst, leaves);
         }
     }
 }
