@@ -8,6 +8,16 @@ pub enum Direction {
     Get,
 }
 
+impl Direction {
+    pub fn resolve(&self, path: PathBuf, shed: PathBuf) -> (PathBuf, PathBuf) {
+        let (src, dst) = match self {
+            Direction::Put => (path, shed),
+            Direction::Get => (shed, path),
+        };
+        (src, dst)
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct Plan {
     pub roots: Vec<Root>,
@@ -35,7 +45,7 @@ pub struct Directory {
     pub leaves: Vec<Leaf>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Leaf {
     pub index: FullIndex,
     pub src: PathBuf,

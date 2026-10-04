@@ -1,6 +1,6 @@
 pub type Index = Vec<usize>;
 
-#[derive(Debug, Eq, Hash, PartialEq)]
+#[derive(Debug, Eq, Hash, PartialEq, Clone)]
 pub struct FullIndex {
     pub manifest: Index,
     pub item: Index,
