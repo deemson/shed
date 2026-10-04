@@ -89,5 +89,4 @@ mod tests {
         assert_eq!(root.get(&[0]), &ItemKind::Path("first".into()));
         assert_eq!(root.get(&[1, 1]), &ItemKind::Path("third".into()));
     }
-
 }

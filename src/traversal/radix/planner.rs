@@ -165,3 +165,113 @@ impl Planner {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preserves_a_declared_manifest_destination_root() {
+        let manifest = Manifest {
+            name: "manifest".into(),
+            location: "/shed/manifest.yaml".into(),
+            path: Some("/config".into()),
+            shed: None,
+            manifests: Vec::new(),
+            items: vec![ItemKind::Path("a".into()), ItemKind::Path("b".into())],
+        };
+
+        let Plan { radix, errors } = Planner::new(Direction::Get).plan(&[manifest]);
+        let actual = radix
+            .range::<Path, _>(..)
+            .map(|(components, entries)| {
+                (components.into_iter().collect::<PathBuf>(), entries.clone())
+            })
+            .collect::<Vec<_>>();
+        let expected = vec![
+            (
+                "/config/a".into(),
+                vec![Entry {
+                    dst_root: Some("/config".into()),
+                    leaf: Leaf {
+                        index: ([0], [0]).into(),
+                        src: "/shed/a".into(),
+                        dst: "a".into(),
+                    },
+                }],
+            ),
+            (
+                "/config/b".into(),
+                vec![Entry {
+                    dst_root: Some("/config".into()),
+                    leaf: Leaf {
+                        index: ([0], [1]).into(),
+                        src: "/shed/b".into(),
+                        dst: "b".into(),
+                    },
+                }],
+            ),
+        ];
+
+        assert_eq!(actual, expected);
+        assert_eq!(errors, vec![]);
+    }
+
+    #[test]
+    fn does_not_infer_a_destination_root_from_a_common_ancestor() {
+        let manifest = Manifest {
+            name: "manifest".into(),
+            location: "/shed/manifest.yaml".into(),
+            path: None,
+            shed: None,
+            manifests: Vec::new(),
+            items: vec![
+                ItemKind::Item(Item {
+                    path: "/config/a".into(),
+                    shed: Some("a".into()),
+                    items: None,
+                }),
+                ItemKind::Item(Item {
+                    path: "/config/b".into(),
+                    shed: Some("b".into()),
+                    items: None,
+                }),
+            ],
+        };
+
+        let Plan { radix, errors } = Planner::new(Direction::Get).plan(&[manifest]);
+        let actual = radix
+            .range::<Path, _>(..)
+            .map(|(components, entries)| {
+                (components.into_iter().collect::<PathBuf>(), entries.clone())
+            })
+            .collect::<Vec<_>>();
+        let expected = vec![
+            (
+                "/config/a".into(),
+                vec![Entry {
+                    dst_root: None,
+                    leaf: Leaf {
+                        index: ([0], [0]).into(),
+                        src: "/shed/a".into(),
+                        dst: "a".into(),
+                    },
+                }],
+            ),
+            (
+                "/config/b".into(),
+                vec![Entry {
+                    dst_root: None,
+                    leaf: Leaf {
+                        index: ([0], [1]).into(),
+                        src: "/shed/b".into(),
+                        dst: "b".into(),
+                    },
+                }],
+            ),
+        ];
+
+        assert_eq!(actual, expected);
+        assert_eq!(errors, vec![]);
+    }
+}
