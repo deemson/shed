@@ -4,10 +4,177 @@ use super::{
     radix,
 };
 use crate::manifest::Manifest;
-use std::{collections::HashSet, path::PathBuf};
+use std::{
+    collections::HashSet,
+    path::{Component, Path, PathBuf},
+};
 
 pub fn plan(direction: Direction, manifests: &[Manifest]) -> Plan {
-    todo!()
+    let radix_plan = radix::Planner::new(direction).plan(manifests);
+    let (mut entries, errors) = collect_non_overlapping_entries(radix_plan);
+    normalize_dst_roots(&mut entries);
+
+    Plan {
+        roots: build_roots(entries),
+        errors,
+    }
+}
+
+fn collect_non_overlapping_entries(
+    plan: radix::model::Plan,
+) -> (Vec<(PathBuf, radix::Entry)>, Vec<Error>) {
+    let entries = plan
+        .radix
+        .range::<Path, _>(..)
+        .map(|(components, entries)| (components.into_iter().collect(), entries.clone()))
+        .collect::<Vec<(PathBuf, Vec<radix::Entry>)>>();
+    let mut omitted = vec![false; entries.len()];
+    let mut valid_entries = Vec::new();
+    let mut errors = plan.errors;
+
+    for (position, (dst, entries_at_dst)) in entries.iter().enumerate() {
+        if omitted[position] {
+            continue;
+        }
+
+        let descendants = entries
+            .iter()
+            .enumerate()
+            .skip(position + 1)
+            .filter_map(|(position, (descendant_dst, _))| {
+                descendant_dst.starts_with(dst).then_some(position)
+            })
+            .collect::<Vec<_>>();
+
+        if entries_at_dst.len() > 1 || !descendants.is_empty() {
+            let mut indexes = HashSet::new();
+            for entry in entries_at_dst {
+                indexes.insert(entry.leaf.index.clone());
+            }
+            omitted[position] = true;
+
+            for descendant in descendants {
+                omitted[descendant] = true;
+                for entry in &entries[descendant].1 {
+                    indexes.insert(entry.leaf.index.clone());
+                }
+            }
+
+            errors.push(Error::OverlappingLeaves { indexes });
+        } else {
+            valid_entries.push((dst.clone(), entries_at_dst[0].clone()));
+        }
+    }
+
+    (valid_entries, errors)
+}
+
+fn normalize_dst_roots(entries: &mut [(PathBuf, radix::Entry)]) {
+    let authored_roots = entries
+        .iter()
+        .filter_map(|(_, entry)| entry.dst_root.clone())
+        .collect::<Vec<_>>();
+
+    for (_, entry) in entries {
+        let Some(root) = &entry.dst_root else {
+            continue;
+        };
+
+        let normalized_root = authored_roots
+            .iter()
+            .filter(|candidate| root.starts_with(candidate))
+            .min_by_key(|candidate| candidate.components().count())
+            .expect("an authored destination root is among the authored roots")
+            .clone();
+        entry.dst_root = Some(normalized_root);
+    }
+}
+
+fn build_roots(entries: Vec<(PathBuf, radix::Entry)>) -> Vec<Root> {
+    let mut roots = Vec::new();
+
+    for (dst, entry) in entries {
+        let radix::Entry { dst_root, leaf } = entry;
+
+        let Some(dst_root) = dst_root else {
+            roots.push(Root::Leaf {
+                index: leaf.index,
+                src: leaf.src,
+                dst,
+            });
+            continue;
+        };
+
+        let relative_dst = dst.strip_prefix(&dst_root).expect(
+            "a leaf destination with a declared root must be under its normalized destination root",
+        );
+        let relative_parent = relative_dst.parent().unwrap_or_else(|| Path::new(""));
+
+        let directory_root = roots.iter_mut().find_map(|root| match root {
+            Root::Directory {
+                dst,
+                directories,
+                leaves,
+            } if *dst == dst_root => Some((directories, leaves)),
+            _ => None,
+        });
+
+        match directory_root {
+            Some((directories, leaves)) => insert_leaf(directories, leaves, relative_parent, leaf),
+            None => {
+                let mut directories = Vec::new();
+                let mut leaves = Vec::new();
+                insert_leaf(&mut directories, &mut leaves, relative_parent, leaf);
+                roots.push(Root::Directory {
+                    dst: dst_root,
+                    directories,
+                    leaves,
+                });
+            }
+        }
+    }
+
+    roots
+}
+
+fn insert_leaf(
+    directories: &mut Vec<Directory>,
+    leaves: &mut Vec<Leaf>,
+    relative_parent: &Path,
+    leaf: Leaf,
+) {
+    let mut components = relative_parent.components();
+    let Some(component) = components.next() else {
+        leaves.push(leaf);
+        return;
+    };
+    let Component::Normal(dst) = component else {
+        panic!("a leaf destination relative to its root contains only normal components");
+    };
+
+    let position = directories
+        .iter()
+        .position(|directory| directory.dst == dst);
+    let directory = match position {
+        Some(position) => &mut directories[position],
+        None => {
+            directories.push(Directory {
+                dst: dst.to_owned(),
+                directories: Vec::new(),
+                leaves: Vec::new(),
+            });
+            directories
+                .last_mut()
+                .expect("a directory was just added to the directory list")
+        }
+    };
+
+    insert_leaf(
+        &mut directory.directories,
+        &mut directory.leaves,
+        components.as_path(),
+        leaf,
+    );
 }
 
 #[cfg(test)]
