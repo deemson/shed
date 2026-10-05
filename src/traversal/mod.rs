@@ -1,4 +1,4 @@
 pub mod error;
 pub mod model;
-pub mod planner;
+pub mod plan;
 pub mod radix;

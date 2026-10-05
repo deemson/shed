@@ -21,7 +21,7 @@ pub fn plan(direction: Direction, manifests: &[Manifest]) -> Plan {
 }
 
 fn collect_non_overlapping_entries(
-    plan: radix::model::Plan,
+    plan: radix::Plan,
 ) -> (Vec<(PathBuf, radix::Entry)>, Vec<Error>) {
     let entries = plan
         .radix
@@ -70,7 +70,7 @@ fn collect_non_overlapping_entries(
 }
 
 fn normalize_dst_roots(entries: &mut [(PathBuf, radix::Entry)]) {
-    let authored_roots = entries
+    let declared_roots = entries
         .iter()
         .filter_map(|(_, entry)| entry.dst_root.clone())
         .collect::<Vec<_>>();
@@ -80,11 +80,11 @@ fn normalize_dst_roots(entries: &mut [(PathBuf, radix::Entry)]) {
             continue;
         };
 
-        let normalized_root = authored_roots
+        let normalized_root = declared_roots
             .iter()
             .filter(|candidate| root.starts_with(candidate))
             .min_by_key(|candidate| candidate.components().count())
-            .expect("an authored destination root is among the authored roots")
+            .expect("a declared destination root is among the declared roots")
             .clone();
         entry.dst_root = Some(normalized_root);
     }
@@ -110,28 +110,26 @@ fn build_roots(entries: Vec<(PathBuf, radix::Entry)>) -> Vec<Root> {
         );
         let relative_parent = relative_dst.parent().unwrap_or_else(|| Path::new(""));
 
-        let directory_root = roots.iter_mut().find_map(|root| match root {
+        let Some((directories, leaves)) = roots.iter_mut().find_map(|root| match root {
             Root::Directory {
                 dst,
                 directories,
                 leaves,
             } if *dst == dst_root => Some((directories, leaves)),
             _ => None,
-        });
+        }) else {
+            let mut directories = Vec::new();
+            let mut leaves = Vec::new();
+            insert_leaf(&mut directories, &mut leaves, relative_parent, leaf);
+            roots.push(Root::Directory {
+                dst: dst_root,
+                directories,
+                leaves,
+            });
+            continue;
+        };
 
-        match directory_root {
-            Some((directories, leaves)) => insert_leaf(directories, leaves, relative_parent, leaf),
-            None => {
-                let mut directories = Vec::new();
-                let mut leaves = Vec::new();
-                insert_leaf(&mut directories, &mut leaves, relative_parent, leaf);
-                roots.push(Root::Directory {
-                    dst: dst_root,
-                    directories,
-                    leaves,
-                });
-            }
-        }
+        insert_leaf(directories, leaves, relative_parent, leaf);
     }
 
     roots
