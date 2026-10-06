@@ -3,7 +3,7 @@ use crate::traversal;
 use tokio::sync::mpsc;
 
 pub(crate) async fn scan(
-    traversal_roots: impl IntoIterator<Item = traversal::Root>,
+    traversal_roots: impl IntoIterator<Item = traversal::Node>,
 ) -> (Vec<Root>, Vec<Event>) {
     let (sender, mut receiver) = mpsc::channel(1);
     let scanner = Scanner::new(sender);
