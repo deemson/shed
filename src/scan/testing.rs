@@ -1,10 +1,10 @@
-use super::{event::Event, model::Root, scanner::Scanner};
+use super::{event::Event, model::Node, scanner::Scanner};
 use crate::traversal;
 use tokio::sync::mpsc;
 
 pub(crate) async fn scan(
     traversal_roots: impl IntoIterator<Item = traversal::Node>,
-) -> (Vec<Root>, Vec<Event>) {
+) -> (Vec<Node>, Vec<Event>) {
     let (sender, mut receiver) = mpsc::channel(1);
     let scanner = Scanner::new(sender);
 

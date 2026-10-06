@@ -14,7 +14,7 @@ impl Scanner {
     pub async fn scan(
         &self,
         traversal_roots: impl IntoIterator<Item = traversal::Node>,
-    ) -> Vec<Root> {
+    ) -> Vec<Node> {
         todo!()
     }
 }
@@ -118,22 +118,139 @@ mod tests {
         .await;
 
         let expected = vec![
-            Root::Directory {
+            Node::EnsureDirectory {
                 dst: dst_dir.join("dir1"),
-                directories: Vec::new(),
-                leaves: vec![],
+                nodes: vec![
+                    Node::EnsureDirectory {
+                        dst: dst_dir.join("dir1/dir11"),
+                        nodes: vec![
+                            Node::ReplaceDirectory {
+                                index: ([0], [0, 0, 0]).into(),
+                                src: src_dir.join("dir1/dir11/dir111"),
+                                dst: dst_dir.join("dir1/dir11/dir111"),
+                                entries: vec![
+                                    Entry::File {
+                                        src: src_dir.join("dir1/dir11/dir111/file1111"),
+                                        dst: dst_dir.join("dir1/dir11/dir111/file1111"),
+                                    },
+                                    Entry::File {
+                                        src: src_dir.join("dir1/dir11/dir111/file1112"),
+                                        dst: dst_dir.join("dir1/dir11/dir111/file1112"),
+                                    },
+                                ],
+                            },
+                            Node::ReplaceFile {
+                                index: ([0], [0, 0, 1]).into(),
+                                src: src_dir.join("dir1/dir11/file111"),
+                                dst: dst_dir.join("dir1/dir11/file111"),
+                            },
+                            Node::ReplaceFile {
+                                index: ([0], [0, 0, 2]).into(),
+                                src: src_dir.join("dir1/dir11/file112"),
+                                dst: dst_dir.join("dir1/dir11/file112"),
+                            },
+                        ],
+                    },
+                    Node::ReplaceDirectory {
+                        index: ([0], [0, 1]).into(),
+                        src: src_dir.join("dir1/dir12"),
+                        dst: dst_dir.join("dir1/dir12"),
+                        entries: vec![
+                            Entry::Directory {
+                                dst: dst_dir.join("dir1/dir12/dir121"),
+                                entries: vec![
+                                    Entry::File {
+                                        src: src_dir.join("dir1/dir12/dir121/file1211"),
+                                        dst: dst_dir.join("dir1/dir12/dir121/file1211"),
+                                    },
+                                    Entry::File {
+                                        src: src_dir.join("dir1/dir12/dir121/file1212"),
+                                        dst: dst_dir.join("dir1/dir12/dir121/file1212"),
+                                    },
+                                ],
+                            },
+                            Entry::Directory {
+                                dst: dst_dir.join("dir1/dir12/dir122"),
+                                entries: vec![
+                                    Entry::File {
+                                        src: src_dir.join("dir1/dir12/dir122/file1221"),
+                                        dst: dst_dir.join("dir1/dir12/dir122/file1221"),
+                                    },
+                                    Entry::File {
+                                        src: src_dir.join("dir1/dir12/dir122/file1222"),
+                                        dst: dst_dir.join("dir1/dir12/dir122/file1222"),
+                                    },
+                                ],
+                            },
+                            Entry::File {
+                                src: src_dir.join("dir1/dir12/file121"),
+                                dst: dst_dir.join("dir1/dir12/file121"),
+                            },
+                            Entry::File {
+                                src: src_dir.join("dir1/dir12/file122"),
+                                dst: dst_dir.join("dir1/dir12/file122"),
+                            },
+                        ],
+                    },
+                    Node::ReplaceFile {
+                        index: ([0], [0, 2]).into(),
+                        src: src_dir.join("dir1/file11"),
+                        dst: dst_dir.join("dir1/file11"),
+                    },
+                    Node::ReplaceFile {
+                        index: ([0], [0, 3]).into(),
+                        src: src_dir.join("dir1/file12"),
+                        dst: dst_dir.join("dir1/file12"),
+                    },
+                ],
             },
-            Root::Directory {
+            Node::ReplaceDirectory {
+                index: ([0], [1]).into(),
+                src: src_dir.join("dir2"),
                 dst: dst_dir.join("dir2"),
-                directories: vec![],
-                leaves: vec![],
+                entries: vec![
+                    Entry::Directory {
+                        dst: dst_dir.join("dir2/dir21"),
+                        entries: vec![
+                            Entry::File {
+                                src: src_dir.join("dir2/dir21/file211"),
+                                dst: dst_dir.join("dir2/dir21/file211"),
+                            },
+                            Entry::File {
+                                src: src_dir.join("dir2/dir21/file212"),
+                                dst: dst_dir.join("dir2/dir21/file212"),
+                            },
+                        ],
+                    },
+                    Entry::Directory {
+                        dst: dst_dir.join("dir2/dir22"),
+                        entries: vec![
+                            Entry::File {
+                                src: src_dir.join("dir2/dir22/file221"),
+                                dst: dst_dir.join("dir2/dir22/file221"),
+                            },
+                            Entry::File {
+                                src: src_dir.join("dir2/dir22/file222"),
+                                dst: dst_dir.join("dir2/dir22/file222"),
+                            },
+                        ],
+                    },
+                    Entry::File {
+                        src: src_dir.join("dir2/file21"),
+                        dst: dst_dir.join("dir2/file21"),
+                    },
+                    Entry::File {
+                        src: src_dir.join("dir2/file22"),
+                        dst: dst_dir.join("dir2/file22"),
+                    },
+                ],
             },
-            Root::File {
+            Node::ReplaceFile {
                 index: ([0], [2]).into(),
                 src: src_dir.join("file1"),
                 dst: dst_dir.join("file1"),
             },
-            Root::File {
+            Node::ReplaceFile {
                 index: ([0], [3]).into(),
                 src: src_dir.join("file2"),
                 dst: dst_dir.join("file2"),
