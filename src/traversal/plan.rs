@@ -1,6 +1,6 @@
 use super::{
     error::Error,
-    model::{Direction, Directory, Leaf, Plan, Root},
+    model::{Direction, Node, Plan},
     radix,
 };
 use crate::manifest::Manifest;
@@ -49,14 +49,14 @@ fn collect_non_overlapping_entries(
         if entries_at_dst.len() > 1 || !descendants.is_empty() {
             let mut indexes = HashSet::new();
             for entry in entries_at_dst {
-                indexes.insert(entry.leaf.index.clone());
+                indexes.insert(entry.index.clone());
             }
             omitted[position] = true;
 
             for descendant in descendants {
                 omitted[descendant] = true;
                 for entry in &entries[descendant].1 {
-                    indexes.insert(entry.leaf.index.clone());
+                    indexes.insert(entry.index.clone());
                 }
             }
 
@@ -90,89 +90,91 @@ fn normalize_dst_roots(entries: &mut [(PathBuf, radix::Entry)]) {
     }
 }
 
-fn build_roots(entries: Vec<(PathBuf, radix::Entry)>) -> Vec<Root> {
+fn build_roots(entries: Vec<(PathBuf, radix::Entry)>) -> Vec<Node> {
     let mut roots = Vec::new();
 
     for (dst, entry) in entries {
-        let radix::Entry { dst_root, leaf } = entry;
+        let radix::Entry {
+            index,
+            src,
+            dst_root,
+        } = entry;
+        let leaf = Node::Leaf { index, src, dst };
 
         let Some(dst_root) = dst_root else {
-            roots.push(Root::Leaf {
-                index: leaf.index,
-                src: leaf.src,
-                dst,
-            });
+            roots.push(leaf);
             continue;
         };
 
-        let relative_dst = dst.strip_prefix(&dst_root).expect(
-            "a leaf destination with a declared root must be under its normalized destination root",
-        );
-        let relative_parent = relative_dst.parent().unwrap_or_else(|| Path::new(""));
-
-        let Some((directories, leaves)) = roots.iter_mut().find_map(|root| match root {
-            Root::Directory {
-                dst,
-                directories,
-                leaves,
-            } if *dst == dst_root => Some((directories, leaves)),
-            _ => None,
-        }) else {
-            let mut directories = Vec::new();
-            let mut leaves = Vec::new();
-            insert_leaf(&mut directories, &mut leaves, relative_parent, leaf);
-            roots.push(Root::Directory {
-                dst: dst_root,
-                directories,
-                leaves,
-            });
-            continue;
+        let nodes = match roots.iter_mut().find_map(|root| match root {
+            Node::Directory { dst, nodes } if *dst == dst_root => Some(nodes),
+            Node::Directory { .. } | Node::Leaf { .. } => None,
+        }) {
+            Some(nodes) => nodes,
+            None => {
+                roots.push(Node::Directory {
+                    dst: dst_root.clone(),
+                    nodes: Vec::new(),
+                });
+                match roots.last_mut() {
+                    Some(Node::Directory { nodes, .. }) => nodes,
+                    Some(Node::Leaf { .. }) | None => unreachable!("a directory was just added"),
+                }
+            }
         };
 
-        insert_leaf(directories, leaves, relative_parent, leaf);
+        insert_leaf(nodes, &dst_root, leaf);
     }
 
     roots
 }
 
-fn insert_leaf(
-    directories: &mut Vec<Directory>,
-    leaves: &mut Vec<Leaf>,
-    relative_parent: &Path,
-    leaf: Leaf,
-) {
-    let mut components = relative_parent.components();
-    let Some(component) = components.next() else {
-        leaves.push(leaf);
-        return;
-    };
-    let Component::Normal(dst) = component else {
-        panic!("a leaf destination relative to its root contains only normal components");
+fn insert_leaf(nodes: &mut Vec<Node>, root: &Path, leaf: Node) {
+    let Node::Leaf { dst, .. } = &leaf else {
+        unreachable!("only leaves are inserted into directory nodes");
     };
 
-    let position = directories
-        .iter()
-        .position(|directory| directory.dst == dst);
-    let directory = match position {
-        Some(position) => &mut directories[position],
-        None => {
-            directories.push(Directory {
-                dst: dst.to_owned(),
-                directories: Vec::new(),
-                leaves: Vec::new(),
-            });
-            directories
-                .last_mut()
-                .expect("a directory was just added to the directory list")
-        }
-    };
-
-    insert_leaf(
-        &mut directory.directories,
-        &mut directory.leaves,
-        components.as_path(),
-        leaf,
+    let relative_dst = dst.strip_prefix(root).expect(
+        "a leaf destination with a declared root must be under its normalized destination root",
     );
+    let relative_parent = relative_dst.parent().unwrap_or_else(|| Path::new(""));
+    let mut parent = root.to_path_buf();
+    let mut children = nodes;
+
+    for component in relative_parent.components() {
+        let Component::Normal(component) = component else {
+            panic!("a leaf destination relative to its root contains only normal components");
+        };
+        parent.push(component);
+
+        let position = children.iter().position(|node| match node {
+            Node::Directory { dst, .. } => *dst == parent,
+            Node::Leaf { .. } => false,
+        });
+        let directory = match position {
+            Some(position) => &mut children[position],
+            None => {
+                let position = children
+                    .iter()
+                    .position(|node| matches!(node, Node::Leaf { .. }))
+                    .unwrap_or(children.len());
+                children.insert(
+                    position,
+                    Node::Directory {
+                        dst: parent.clone(),
+                        nodes: Vec::new(),
+                    },
+                );
+                &mut children[position]
+            }
+        };
+        children = match directory {
+            Node::Directory { nodes, .. } => nodes,
+            Node::Leaf { .. } => unreachable!("only directories are traversed"),
+        };
+    }
+
+    children.push(leaf);
 }
 
 #[cfg(test)]
@@ -181,6 +183,53 @@ mod tests {
     use crate::manifest::{Input, testing as testing_m};
     use indoc::formatdoc;
     use tempfile::TempDir;
+
+    #[test]
+    fn groups_siblings_with_full_destinations_and_directories_before_leaves() {
+        let entries = ["a", "z/b", "z/c"]
+            .into_iter()
+            .enumerate()
+            .map(|(position, path)| {
+                (
+                    Path::new("/config").join(path),
+                    radix::Entry {
+                        dst_root: Some("/config".into()),
+                        index: ([0], [position]).into(),
+                        src: Path::new("/shed").join(path),
+                    },
+                )
+            })
+            .collect();
+
+        assert_eq!(
+            build_roots(entries),
+            vec![Node::Directory {
+                dst: "/config".into(),
+                nodes: vec![
+                    Node::Directory {
+                        dst: "/config/z".into(),
+                        nodes: vec![
+                            Node::Leaf {
+                                index: ([0], [1]).into(),
+                                src: "/shed/z/b".into(),
+                                dst: "/config/z/b".into(),
+                            },
+                            Node::Leaf {
+                                index: ([0], [2]).into(),
+                                src: "/shed/z/c".into(),
+                                dst: "/config/z/c".into(),
+                            },
+                        ],
+                    },
+                    Node::Leaf {
+                        index: ([0], [0]).into(),
+                        src: "/shed/a".into(),
+                        dst: "/config/a".into(),
+                    },
+                ],
+            }]
+        );
+    }
 
     #[tokio::test]
     async fn plans_two_root_leaves_for_get() {
@@ -217,12 +266,12 @@ mod tests {
         let actual = plan(Direction::Get, &manifests);
         let expected = Plan {
             roots: vec![
-                Root::Leaf {
+                Node::Leaf {
                     index: ([0], [0]).into(),
                     src: manifest_directory.join("leaf1"),
                     dst: path_dir.join("leaf1"),
                 },
-                Root::Leaf {
+                Node::Leaf {
                     index: ([0], [1]).into(),
                     src: manifest_directory.join("leaf2"),
                     dst: path_dir.join("leaf2"),
@@ -230,7 +279,6 @@ mod tests {
             ],
             errors: Vec::new(),
         };
-
         assert_eq!(actual, expected);
     }
 
@@ -267,25 +315,23 @@ mod tests {
 
         let actual = plan(Direction::Put, &manifests);
         let expected = Plan {
-            roots: vec![Root::Directory {
-                dst: manifest_directory,
-                directories: Vec::new(),
-                leaves: vec![
-                    Leaf {
+            roots: vec![Node::Directory {
+                dst: manifest_directory.clone(),
+                nodes: vec![
+                    Node::Leaf {
                         index: ([0], [0]).into(),
                         src: path_dir.join("leaf1"),
-                        dst: "leaf1".into(),
+                        dst: manifest_directory.join("leaf1"),
                     },
-                    Leaf {
+                    Node::Leaf {
                         index: ([0], [1]).into(),
                         src: path_dir.join("leaf2"),
-                        dst: "leaf2".into(),
+                        dst: manifest_directory.join("leaf2"),
                     },
                 ],
             }],
             errors: Vec::new(),
         };
-
         assert_eq!(actual, expected);
     }
 
@@ -327,33 +373,29 @@ mod tests {
 
         let actual = plan(Direction::Get, &manifests);
         let expected = Plan {
-            roots: vec![Root::Directory {
-                dst: path_dir,
-                directories: vec![Directory {
-                    dst: "dir1".into(),
-                    directories: vec![Directory {
-                        dst: "dir2".into(),
-                        directories: Vec::new(),
-                        leaves: vec![
-                            Leaf {
+            roots: vec![Node::Directory {
+                dst: path_dir.clone(),
+                nodes: vec![Node::Directory {
+                    dst: path_dir.join("dir1"),
+                    nodes: vec![Node::Directory {
+                        dst: path_dir.join("dir1/dir2"),
+                        nodes: vec![
+                            Node::Leaf {
                                 index: ([0], [0, 0, 0, 0]).into(),
                                 src: manifest_directory.join("dir1/dir2/leaf1"),
-                                dst: "leaf1".into(),
+                                dst: path_dir.join("dir1/dir2/leaf1"),
                             },
-                            Leaf {
+                            Node::Leaf {
                                 index: ([0], [0, 0, 0, 1]).into(),
                                 src: manifest_directory.join("dir1/dir2/leaf2"),
-                                dst: "leaf2".into(),
+                                dst: path_dir.join("dir1/dir2/leaf2"),
                             },
                         ],
                     }],
-                    leaves: Vec::new(),
                 }],
-                leaves: Vec::new(),
             }],
             errors: Vec::new(),
         };
-
         assert_eq!(actual, expected);
     }
 
@@ -390,25 +432,23 @@ mod tests {
 
         let actual = plan(Direction::Get, &manifests);
         let expected = Plan {
-            roots: vec![Root::Directory {
-                dst: path_dir,
-                directories: Vec::new(),
-                leaves: vec![
-                    Leaf {
+            roots: vec![Node::Directory {
+                dst: path_dir.clone(),
+                nodes: vec![
+                    Node::Leaf {
                         index: ([0], [0]).into(),
                         src: manifest_directory.join("leaf1"),
-                        dst: "leaf1".into(),
+                        dst: path_dir.join("leaf1"),
                     },
-                    Leaf {
+                    Node::Leaf {
                         index: ([0], [1]).into(),
                         src: manifest_directory.join("leaf2"),
-                        dst: "leaf2".into(),
+                        dst: path_dir.join("leaf2"),
                     },
                 ],
             }],
             errors: Vec::new(),
         };
-
         assert_eq!(actual, expected);
     }
 
@@ -462,30 +502,29 @@ mod tests {
 
         let actual = plan(Direction::Get, &manifests);
         let expected = Plan {
-            roots: vec![Root::Directory {
-                dst: path_dir,
-                directories: vec![Directory {
-                    dst: "sub-dir1".into(),
-                    directories: vec![Directory {
-                        dst: "sub-dir2".into(),
-                        directories: Vec::new(),
-                        leaves: vec![Leaf {
-                            index: ([0, 0], [0]).into(),
-                            src: manifest_directory.join("sub-dir-leaf"),
-                            dst: "sub-dir-leaf".into(),
+            roots: vec![Node::Directory {
+                dst: path_dir.clone(),
+                nodes: vec![
+                    Node::Directory {
+                        dst: path_dir.join("sub-dir1"),
+                        nodes: vec![Node::Directory {
+                            dst: path_dir.join("sub-dir1/sub-dir2"),
+                            nodes: vec![Node::Leaf {
+                                index: ([0, 0], [0]).into(),
+                                src: manifest_directory.join("sub-dir-leaf"),
+                                dst: path_dir.join("sub-dir1/sub-dir2/sub-dir-leaf"),
+                            }],
                         }],
-                    }],
-                    leaves: Vec::new(),
-                }],
-                leaves: vec![Leaf {
-                    index: ([0, 1], [0]).into(),
-                    src: manifest_directory.join("top-leaf"),
-                    dst: "top-leaf".into(),
-                }],
+                    },
+                    Node::Leaf {
+                        index: ([0, 1], [0]).into(),
+                        src: manifest_directory.join("top-leaf"),
+                        dst: path_dir.join("top-leaf"),
+                    },
+                ],
             }],
             errors: Vec::new(),
         };
-
         assert_eq!(actual, expected);
     }
 
@@ -540,28 +579,25 @@ mod tests {
         let actual = plan(Direction::Get, &manifests);
         let expected = Plan {
             roots: vec![
-                Root::Directory {
+                Node::Directory {
                     dst: path_dir.join("sub-dir1"),
-                    directories: Vec::new(),
-                    leaves: vec![Leaf {
+                    nodes: vec![Node::Leaf {
                         index: ([0, 0], [0]).into(),
                         src: manifest_directory.join("sub-dir1-leaf"),
-                        dst: "sub-dir1-leaf".into(),
+                        dst: path_dir.join("sub-dir1/sub-dir1-leaf"),
                     }],
                 },
-                Root::Directory {
+                Node::Directory {
                     dst: path_dir.join("sub-dir2"),
-                    directories: Vec::new(),
-                    leaves: vec![Leaf {
+                    nodes: vec![Node::Leaf {
                         index: ([0, 1], [0]).into(),
                         src: manifest_directory.join("sub-dir2-leaf"),
-                        dst: "sub-dir2-leaf".into(),
+                        dst: path_dir.join("sub-dir2/sub-dir2-leaf"),
                     }],
                 },
             ],
             errors: Vec::new(),
         };
-
         assert_eq!(actual, expected);
     }
 
@@ -601,7 +637,7 @@ mod tests {
 
         let actual = plan(Direction::Get, &manifests);
         let expected = Plan {
-            roots: vec![Root::Leaf {
+            roots: vec![Node::Leaf {
                 index: ([0], [0]).into(),
                 src: manifest_directory.join("valid-leaf"),
                 dst: path_dir.join("valid-leaf"),
@@ -610,7 +646,6 @@ mod tests {
                 indexes: [([0], [1]).into(), ([0], [2]).into()].into(),
             }],
         };
-
         assert_eq!(actual, expected);
     }
 
@@ -650,7 +685,7 @@ mod tests {
 
         let actual = plan(Direction::Get, &manifests);
         let expected = Plan {
-            roots: vec![Root::Leaf {
+            roots: vec![Node::Leaf {
                 index: ([0], [0]).into(),
                 src: manifest_directory.join("valid-leaf"),
                 dst: path_dir.join("valid-leaf"),
@@ -659,7 +694,6 @@ mod tests {
                 indexes: [([0], [1]).into(), ([0], [2]).into()].into(),
             }],
         };
-
         assert_eq!(actual, expected);
     }
 
@@ -699,20 +733,18 @@ mod tests {
 
         let actual = plan(Direction::Get, &manifests);
         let expected = Plan {
-            roots: vec![Root::Directory {
-                dst: path_dir,
-                directories: Vec::new(),
-                leaves: vec![Leaf {
+            roots: vec![Node::Directory {
+                dst: path_dir.clone(),
+                nodes: vec![Node::Leaf {
                     index: ([0], [0, 0]).into(),
                     src: manifest_directory.join("valid-leaf"),
-                    dst: "valid-leaf".into(),
+                    dst: path_dir.join("valid-leaf"),
                 }],
             }],
             errors: vec![Error::NonRootPathShedBothAbsolute {
                 index: ([0], [0, 1]).into(),
             }],
         };
-
         assert_eq!(actual, expected);
     }
 }

@@ -1,7 +1,4 @@
-use super::super::{
-    error::Error,
-    model::{Direction, Leaf},
-};
+use super::super::{error::Error, model::Direction};
 use super::model::{Entry, Plan};
 use crate::manifest::{FullIndex, Index, Item, ItemKind, Manifest};
 use std::path::{Path, PathBuf};
@@ -145,21 +142,11 @@ impl Planner {
         } else {
             let (src, dst) = self.direction.resolve(path, shed);
 
-            let dst_name = dst
-                .file_name()
-                .expect("a leaf destination has a file name")
-                .to_owned();
-
-            let leaf = Leaf {
-                index,
-                src,
-                dst: dst_name,
-            };
-
             let mut entries = plan.radix.get(&dst).cloned().unwrap_or_default();
             entries.push(Entry {
                 dst_root: dst_root.map(Path::to_path_buf),
-                leaf,
+                index,
+                src,
             });
             plan.radix.insert(&dst, entries);
         }
@@ -193,22 +180,16 @@ mod tests {
                 "/config/a".into(),
                 vec![Entry {
                     dst_root: Some("/config".into()),
-                    leaf: Leaf {
-                        index: ([0], [0]).into(),
-                        src: "/shed/a".into(),
-                        dst: "a".into(),
-                    },
+                    index: ([0], [0]).into(),
+                    src: "/shed/a".into(),
                 }],
             ),
             (
                 "/config/b".into(),
                 vec![Entry {
                     dst_root: Some("/config".into()),
-                    leaf: Leaf {
-                        index: ([0], [1]).into(),
-                        src: "/shed/b".into(),
-                        dst: "b".into(),
-                    },
+                    index: ([0], [1]).into(),
+                    src: "/shed/b".into(),
                 }],
             ),
         ];
@@ -251,22 +232,16 @@ mod tests {
                 "/config/a".into(),
                 vec![Entry {
                     dst_root: None,
-                    leaf: Leaf {
-                        index: ([0], [0]).into(),
-                        src: "/shed/a".into(),
-                        dst: "a".into(),
-                    },
+                    index: ([0], [0]).into(),
+                    src: "/shed/a".into(),
                 }],
             ),
             (
                 "/config/b".into(),
                 vec![Entry {
                     dst_root: None,
-                    leaf: Leaf {
-                        index: ([0], [1]).into(),
-                        src: "/shed/b".into(),
-                        dst: "b".into(),
-                    },
+                    index: ([0], [1]).into(),
+                    src: "/shed/b".into(),
                 }],
             ),
         ];

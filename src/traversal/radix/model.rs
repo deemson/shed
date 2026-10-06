@@ -1,4 +1,5 @@
-use super::super::{error::Error, model::Leaf};
+use super::super::error::Error;
+use crate::manifest::FullIndex;
 use iradix::unsync::Radix;
 use std::{ffi::OsString, path::PathBuf};
 
@@ -11,5 +12,6 @@ pub(in crate::traversal) struct Plan {
 #[derive(Debug, PartialEq, Clone)]
 pub(in crate::traversal) struct Entry {
     pub dst_root: Option<PathBuf>,
-    pub leaf: Leaf,
+    pub index: FullIndex,
+    pub src: PathBuf,
 }

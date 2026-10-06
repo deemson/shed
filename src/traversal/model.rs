@@ -1,6 +1,6 @@
 use super::error::Error;
 use crate::manifest::FullIndex;
-use std::{ffi::OsString, path::PathBuf};
+use std::path::PathBuf;
 
 #[derive(Clone)]
 pub enum Direction {
@@ -20,34 +20,19 @@ impl Direction {
 
 #[derive(Debug, PartialEq)]
 pub struct Plan {
-    pub roots: Vec<Root>,
+    pub roots: Vec<Node>,
     pub errors: Vec<Error>,
 }
 
 #[derive(Debug, PartialEq)]
-pub enum Root {
+pub enum Node {
     Directory {
         dst: PathBuf,
-        directories: Vec<Directory>,
-        leaves: Vec<Leaf>,
+        nodes: Vec<Node>,
     },
     Leaf {
         index: FullIndex,
         src: PathBuf,
         dst: PathBuf,
     },
-}
-
-#[derive(Debug, PartialEq)]
-pub struct Directory {
-    pub dst: OsString,
-    pub directories: Vec<Directory>,
-    pub leaves: Vec<Leaf>,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct Leaf {
-    pub index: FullIndex,
-    pub src: PathBuf,
-    pub dst: OsString,
 }
