@@ -24,3 +24,17 @@ pub(crate) async fn scan(
 
     tokio::join!(produce, collect)
 }
+
+#[track_caller]
+pub(crate) fn assert_events_contain_no_errors(events: &[Event]) {
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, Event::Error { .. }))
+    );
+}
+
+#[track_caller]
+pub(crate) fn assert_events_contain_done_last(events: &[Event]) {
+    assert!(matches!(events.last(), Some(Event::Done)));
+}

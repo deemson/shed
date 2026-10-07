@@ -1,5 +1,7 @@
-use super::{event::*, model::*};
-use crate::traversal;
+use super::{error::*, event::*, model::*};
+use crate::{manifest::FullIndex, traversal};
+use futures::future::join_all;
+use std::path::Path;
 use tokio::sync::mpsc;
 
 pub struct Scanner {
@@ -15,7 +17,153 @@ impl Scanner {
         &self,
         traversal_roots: impl IntoIterator<Item = traversal::Node>,
     ) -> Vec<Node> {
-        todo!()
+        let roots = self.scan_nodes(traversal_roots).await;
+        self.send_event(Event::Done).await;
+        roots
+    }
+
+    pub async fn scan_nodes(
+        &self,
+        traversal_nodes: impl IntoIterator<Item = traversal::Node>,
+    ) -> Vec<Node> {
+        let nodes = join_all(traversal_nodes.into_iter().map(|node| self.scan_node(node))).await;
+        nodes.into_iter().flatten().collect()
+    }
+
+    pub async fn scan_node(&self, node: traversal::Node) -> Option<Node> {
+        match node {
+            traversal::Node::Directory { dst, nodes } => Some(Node::EnsureDirectory {
+                dst,
+                nodes: self.scan_nodes(nodes).await,
+            }),
+            traversal::Node::Leaf { index, src, dst } => {
+                let metadata = match tokio::fs::symlink_metadata(&src).await {
+                    Ok(metadata) => metadata,
+                    Err(source) => {
+                        self.send_event(Event::Error {
+                            index,
+                            error: Error::MetadataIo { path: src, source },
+                        })
+                        .await;
+                        return None;
+                    }
+                };
+                if metadata.is_file() {
+                    return Some(Node::ReplaceFile { index, src, dst });
+                }
+                if metadata.is_dir() {
+                    let entries = self.scan_entries(&index, &src, &dst).await?;
+                    return Some(Node::ReplaceDirectory {
+                        index,
+                        src,
+                        dst,
+                        entries,
+                    });
+                }
+                self.send_event(Event::Error {
+                    index,
+                    error: Error::UnsupportedFileType {
+                        path: src,
+                    },
+                })
+                .await;
+                None
+            }
+        }
+    }
+
+    pub async fn scan_entries(
+        &self,
+        index: &FullIndex,
+        src: &Path,
+        dst: &Path,
+    ) -> Option<Vec<Entry>> {
+        let mut read_dir = match tokio::fs::read_dir(src).await {
+            Ok(read_dir) => read_dir,
+            Err(source) => {
+                self.send_event(Event::Error {
+                    index: index.clone(),
+                    error: Error::ReadDirIo {
+                        path: src.to_path_buf(),
+                        source,
+                    },
+                })
+                .await;
+                return None;
+            }
+        };
+
+        let mut child_srcs = Vec::new();
+        while let Some(result) = read_dir.next_entry().await.transpose() {
+            match result {
+                Ok(entry) => child_srcs.push(entry.path()),
+                Err(source) => {
+                    self.send_event(Event::Error {
+                        index: index.clone(),
+                        error: Error::ReadDirIo {
+                            path: src.to_path_buf(),
+                            source,
+                        },
+                    })
+                    .await;
+                    return None;
+                }
+            }
+        }
+        child_srcs.sort();
+
+        let entries = join_all(child_srcs.iter().map(|child_src| async {
+            let filename = child_src
+                .file_name()
+                .expect("a directory entry has a filename");
+            let child_dst = dst.join(filename);
+            self.scan_entry(index, child_src, &child_dst).await
+        }))
+        .await;
+
+        Some(entries.into_iter().flatten().collect())
+    }
+
+    pub async fn scan_entry(&self, index: &FullIndex, src: &Path, dst: &Path) -> Option<Entry> {
+        let metadata = match tokio::fs::symlink_metadata(src).await {
+            Ok(metadata) => metadata,
+            Err(source) => {
+                self.send_event(Event::Error {
+                    index: index.clone(),
+                    error: Error::MetadataIo {
+                        path: src.to_path_buf(),
+                        source,
+                    },
+                })
+                .await;
+                return None;
+            }
+        };
+        if metadata.is_dir() {
+            let entries = self.scan_entries(index, src, dst).await?;
+            return Some(Entry::Directory {
+                dst: dst.to_path_buf(),
+                entries,
+            });
+        }
+        if metadata.is_file() {
+            return Some(Entry::File {
+                src: src.to_path_buf(),
+                dst: dst.to_path_buf(),
+            });
+        }
+        self.send_event(Event::Error {
+            index: index.clone(),
+            error: Error::UnsupportedFileType {
+                path: src.to_path_buf(),
+            },
+        })
+        .await;
+        None
+    }
+
+    async fn send_event(&self, event: Event) {
+        let _ = self.event_sender.send(event).await;
     }
 }
 
@@ -58,7 +206,7 @@ mod tests {
             testing_m::write(&src_dir.join(path), path);
         }
 
-        let (actual, _) = testing_s::scan([
+        let (actual, events) = testing_s::scan([
             traversal::Node::Directory {
                 dst: dst_dir.join("dir1"),
                 nodes: vec![
@@ -116,6 +264,9 @@ mod tests {
             },
         ])
         .await;
+
+        testing_s::assert_events_contain_no_errors(&events);
+        testing_s::assert_events_contain_done_last(&events);
 
         let expected = vec![
             Node::EnsureDirectory {

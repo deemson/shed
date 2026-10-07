@@ -29,18 +29,21 @@ pub(crate) fn write_yaml_manifest<C: AsRef<[u8]>>(
     fs::canonicalize(path).unwrap()
 }
 
+#[track_caller]
 pub(crate) fn assert_events_contain_started(events: &[Event], expected_index: &[usize]) {
     assert!(events.iter().any(|event| {
         matches!(event, Event::Started { index } if index.as_slice() == expected_index)
     }));
 }
 
+#[track_caller]
 pub(crate) fn assert_events_contain_resolved(events: &[Event], expected_index: &[usize]) {
     assert!(events.iter().any(|event| {
         matches!(event, Event::Resolved { index } if index.as_slice() == expected_index)
     }));
 }
 
+#[track_caller]
 pub(crate) fn assert_events_contain_no_errors(events: &[Event]) {
     assert!(
         !events
@@ -49,6 +52,7 @@ pub(crate) fn assert_events_contain_no_errors(events: &[Event]) {
     );
 }
 
+#[track_caller]
 pub(crate) fn assert_events_contain_done_last(events: &[Event]) {
     assert!(matches!(events.last(), Some(Event::Done)));
 }
