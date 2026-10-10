@@ -1,4 +1,5 @@
 mod cli;
+mod execution;
 mod manifest;
 mod scanning;
 mod traversal;
@@ -65,5 +66,27 @@ async fn run(args: &PutGetArgs, direction: traversal::Direction) {
     };
     let (scan, ()) = tokio::join!(scanner.scan(plan.roots), consume_scan_events);
 
-    dbg!(&scan);
+    // dbg!(&scan);
+
+    let (execute_sender, mut execute_receiver) = mpsc::channel(32);
+    let executor = execution::Executor::new(true, execute_sender);
+
+    let consume_execute_events = async {
+        let mut events = Vec::new();
+
+        while let Some(event) = execute_receiver.recv().await {
+            let done = matches!(event, execution::Event::Done);
+            events.push(event);
+
+            if done {
+                break;
+            }
+        }
+
+        events
+    };
+
+    let ((), execute_events) = tokio::join!(executor.execute(&scan), consume_execute_events);
+
+    dbg!(execute_events);
 }

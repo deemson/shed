@@ -29,13 +29,17 @@ impl Executor {
     async fn execute_node(&self, node: &scanning::Node) {
         match node {
             Node::EnsureDirectory { dst, nodes } => {
+                self.send_event(Event::EnsureStarted {
+                    dst: dst.to_path_buf(),
+                })
+                .await;
                 if let Err(source) = Self::check_destination_directory(dst).await {
-                    self.send_event(Event::EnsureError {
-                        error: Error::EnsureDirectoryIo {
-                            path: dst.to_path_buf(),
+                    self.send_event(Event::EnsureFinished {
+                        dst: dst.to_path_buf(),
+                        error: Some(Error::EnsureDirectoryIo {
                             source,
                             child_indexes: Self::collect_node_child_indexes(node),
-                        },
+                        }),
                     })
                     .await;
 
@@ -43,12 +47,12 @@ impl Executor {
                 }
 
                 if let Err(source) = self.ensure_destination_directory(dst).await {
-                    self.send_event(Event::EnsureError {
-                        error: Error::EnsureDirectoryIo {
-                            path: dst.to_path_buf(),
+                    self.send_event(Event::EnsureFinished {
+                        dst: dst.to_path_buf(),
+                        error: Some(Error::EnsureDirectoryIo {
                             source,
                             child_indexes: Self::collect_node_child_indexes(node),
-                        },
+                        }),
                     })
                     .await;
 
@@ -56,6 +60,11 @@ impl Executor {
                 }
 
                 self.execute_nodes(nodes).await;
+                self.send_event(Event::EnsureFinished {
+                    dst: dst.to_path_buf(),
+                    error: None,
+                })
+                .await;
             }
             Node::ReplaceDirectory {
                 index,
@@ -63,6 +72,13 @@ impl Executor {
                 dst,
                 entries,
             } => {
+                self.send_event(Event::ReplaceStarted {
+                    index: index.clone(),
+                    src: src.to_path_buf(),
+                    dst: dst.to_path_buf(),
+                })
+                .await;
+
                 let (src_result, dst_result) = tokio::join!(
                     Self::check_source_directory(src),
                     Self::check_destination_directory(dst),
@@ -72,13 +88,11 @@ impl Executor {
 
                 for result in [src_result, dst_result] {
                     if let Err(source) = result {
-                        self.send_event(Event::ReplaceError {
+                        self.send_event(Event::ReplaceFinished {
                             index: index.clone(),
-                            error: Error::ReplaceIo {
-                                src: src.to_path_buf(),
-                                dst: dst.to_path_buf(),
-                                source,
-                            },
+                            src: src.to_path_buf(),
+                            dst: dst.to_path_buf(),
+                            error: Some(Error::ReplaceIo { source }),
                         })
                         .await;
                     }
@@ -89,13 +103,11 @@ impl Executor {
                 }
 
                 if let Err(source) = self.replace_destination_directory(dst).await {
-                    self.send_event(Event::ReplaceError {
+                    self.send_event(Event::ReplaceFinished {
                         index: index.clone(),
-                        error: Error::ReplaceIo {
-                            src: src.to_path_buf(),
-                            dst: dst.to_path_buf(),
-                            source,
-                        },
+                        src: src.to_path_buf(),
+                        dst: dst.to_path_buf(),
+                        error: Some(Error::ReplaceIo { source }),
                     })
                     .await;
 
@@ -104,8 +116,22 @@ impl Executor {
 
                 self.execute_directory_entries(src, dst, index, entries)
                     .await;
+                self.send_event(Event::ReplaceFinished {
+                    index: index.clone(),
+                    src: src.to_path_buf(),
+                    dst: dst.to_path_buf(),
+                    error: None,
+                })
+                .await;
             }
             Node::ReplaceFile { index, src, dst } => {
+                self.send_event(Event::ReplaceStarted {
+                    index: index.clone(),
+                    src: src.to_path_buf(),
+                    dst: dst.to_path_buf(),
+                })
+                .await;
+
                 let (src_result, dst_result) = tokio::join!(
                     Self::check_source_file(src),
                     Self::check_destination_file(dst),
@@ -115,13 +141,11 @@ impl Executor {
 
                 for result in [src_result, dst_result] {
                     if let Err(source) = result {
-                        self.send_event(Event::ReplaceError {
+                        self.send_event(Event::ReplaceFinished {
                             index: index.clone(),
-                            error: Error::ReplaceIo {
-                                src: src.to_path_buf(),
-                                dst: dst.to_path_buf(),
-                                source,
-                            },
+                            src: src.to_path_buf(),
+                            dst: dst.to_path_buf(),
+                            error: Some(Error::ReplaceIo { source }),
                         })
                         .await;
                     }
@@ -134,13 +158,11 @@ impl Executor {
                 if index.item.len() == 1 {
                     let dst_parent = dst.parent().expect("file destination must have a parent");
                     if let Err(source) = self.ensure_destination_directory(dst_parent).await {
-                        self.send_event(Event::ReplaceError {
+                        self.send_event(Event::ReplaceFinished {
                             index: index.clone(),
-                            error: Error::ReplaceIo {
-                                src: src.to_path_buf(),
-                                dst: dst.to_path_buf(),
-                                source,
-                            },
+                            src: src.to_path_buf(),
+                            dst: dst.to_path_buf(),
+                            error: Some(Error::ReplaceIo { source }),
                         })
                         .await;
 
@@ -149,16 +171,22 @@ impl Executor {
                 }
 
                 if let Err(source) = self.ensure_file(src, dst).await {
-                    self.send_event(Event::ReplaceError {
+                    self.send_event(Event::ReplaceFinished {
                         index: index.clone(),
-                        error: Error::ReplaceIo {
-                            src: src.to_path_buf(),
-                            dst: dst.to_path_buf(),
-                            source,
-                        },
+                        src: src.to_path_buf(),
+                        dst: dst.to_path_buf(),
+                        error: Some(Error::ReplaceIo { source }),
                     })
                     .await;
                 }
+
+                self.send_event(Event::ReplaceFinished {
+                    index: index.clone(),
+                    src: src.to_path_buf(),
+                    dst: dst.to_path_buf(),
+                    error: None,
+                })
+                .await;
             }
         }
     }
@@ -191,33 +219,59 @@ impl Executor {
                     .strip_prefix(dst_parent)
                     .expect("scanned entry destination must be inside its parent");
                 let src = src_parent.join(relative);
+
+                self.send_event(Event::ReplaceStarted {
+                    index: index.clone(),
+                    src: src.to_path_buf(),
+                    dst: dst.to_path_buf(),
+                })
+                .await;
+
                 if let Err(source) = self.ensure_destination_directory(dst).await {
-                    self.send_event(Event::ReplaceError {
+                    self.send_event(Event::ReplaceFinished {
                         index: index.clone(),
-                        error: Error::ReplaceIo {
-                            src: src.to_path_buf(),
-                            dst: dst.to_path_buf(),
-                            source,
-                        },
+                        src: src.to_path_buf(),
+                        dst: dst.to_path_buf(),
+                        error: Some(Error::ReplaceIo { source }),
                     })
                     .await;
                     return;
                 }
                 self.execute_directory_entries(&src, dst, index, entries)
                     .await;
+                self.send_event(Event::ReplaceFinished {
+                    index: index.clone(),
+                    src: src.to_path_buf(),
+                    dst: dst.to_path_buf(),
+                    error: None,
+                })
+                .await;
             }
             scanning::Entry::File { src, dst } => {
+                self.send_event(Event::ReplaceStarted {
+                    index: index.clone(),
+                    src: src.to_path_buf(),
+                    dst: dst.to_path_buf(),
+                })
+                .await;
+
                 if let Err(source) = self.ensure_file(src, dst).await {
-                    self.send_event(Event::ReplaceError {
+                    self.send_event(Event::ReplaceFinished {
                         index: index.clone(),
-                        error: Error::ReplaceIo {
-                            src: src.to_path_buf(),
-                            dst: dst.to_path_buf(),
-                            source,
-                        },
+                        src: src.to_path_buf(),
+                        dst: dst.to_path_buf(),
+                        error: Some(Error::ReplaceIo { source }),
                     })
                     .await;
                 }
+
+                self.send_event(Event::ReplaceFinished {
+                    index: index.clone(),
+                    src: src.to_path_buf(),
+                    dst: dst.to_path_buf(),
+                    error: None,
+                })
+                .await;
             }
         }
     }

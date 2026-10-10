@@ -29,7 +29,7 @@ pub(super) fn assert_events_contain_no_ensure_errors(events: &[Event]) {
     assert!(
         !events
             .iter()
-            .any(|event| matches!(event, Event::EnsureError { .. }))
+            .any(|event| matches!(event, Event::EnsureFinished { error: Some(_), .. }))
     );
 }
 
@@ -38,7 +38,7 @@ pub(super) fn assert_events_contain_no_replace_errors(events: &[Event]) {
     assert!(
         !events
             .iter()
-            .any(|event| matches!(event, Event::ReplaceError { .. }))
+            .any(|event| matches!(event, Event::ReplaceFinished { error: Some(_), .. }))
     );
 }
 

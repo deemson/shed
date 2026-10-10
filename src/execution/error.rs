@@ -1,19 +1,16 @@
 use crate::manifest::FullIndex;
-use std::{io, path::PathBuf};
+use std::io;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("failed to ensure directory at {}: {source}", path.display())]
+    #[error("failed to ensure directory: {source}")]
     EnsureDirectoryIo {
-        path: PathBuf,
         #[source]
         source: io::Error,
         child_indexes: Vec<FullIndex>,
     },
-    #[error("failed to replace from {} to {}: {source}", src.display(), dst.display())]
+    #[error("failed to replace: {source}")]
     ReplaceIo {
-        src: PathBuf,
-        dst: PathBuf,
         #[source]
         source: io::Error,
     },
