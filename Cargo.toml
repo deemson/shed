@@ -21,9 +21,12 @@ futures = "0.3"
 async-walkdir = "2"
 yaml_serde = "0.10"
 iradix = "0.3.0"
+shellexpand = { version = "3", default-features = false, features = ["base-0", "path", "tilde"] }
+path-clean = "1.0.1"
 
 [dev-dependencies]
 indoc = "2.0.7"
+pretty_assertions = "1.4.1"
 tempfile = "3"
 
 [profile.release]

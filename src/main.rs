@@ -1,6 +1,69 @@
+mod cli;
+mod manifest;
+mod scanning;
+mod traversal;
+mod util;
+use cli::{Cli, Command, ManifestCommand, PutGetArgs};
 use std::process::ExitCode;
+use tokio::sync::mpsc;
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> ExitCode {
+    let cli = Cli::parse_args();
+
+    if let Command::Manifest {
+        command: ManifestCommand::Schema,
+    } = &cli.command
+    {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&manifest::yaml::schema()).unwrap()
+        );
+        return ExitCode::SUCCESS;
+    }
+
+    match &cli.command {
+        Command::Put(args) => run(args, traversal::Direction::Put).await,
+        Command::Get(args) => run(args, traversal::Direction::Get).await,
+        Command::Manifest { .. } => unreachable!(),
+    };
+
     ExitCode::SUCCESS
+}
+
+async fn run(args: &PutGetArgs, direction: traversal::Direction) {
+    let resolve_inputs = args.manifests.iter().map(|path| manifest::Input {
+        name: path.display().to_string(),
+        path: path.clone(),
+    });
+
+    let (resolve_sender, mut resolve_receiver) = mpsc::channel(32);
+    let resolver = manifest::Resolver::new(resolve_sender);
+    let consume_resolve_events = async {
+        while let Some(event) = resolve_receiver.recv().await {
+            if matches!(event, manifest::Event::Done) {
+                break;
+            }
+        }
+    };
+    let (manifests, ()) = tokio::join!(resolver.resolve(resolve_inputs), consume_resolve_events);
+
+    // dbg!(&manifests);
+
+    let plan = traversal::plan(direction, &manifests);
+
+    // dbg!(&plan);
+
+    let (scan_sender, mut scan_receiver) = mpsc::channel(32);
+    let scanner = scanning::Scanner::new(scan_sender);
+    let consume_scan_events = async {
+        while let Some(event) = scan_receiver.recv().await {
+            if matches!(event, scanning::Event::Done) {
+                break;
+            }
+        }
+    };
+    let (scan, ()) = tokio::join!(scanner.scan(plan.roots), consume_scan_events);
+
+    dbg!(&scan);
 }
