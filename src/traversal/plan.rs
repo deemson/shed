@@ -182,53 +182,68 @@ mod tests {
     use super::*;
     use crate::manifest::{Input, testing as testing_m};
     use indoc::formatdoc;
+    use pretty_assertions::assert_eq;
     use tempfile::TempDir;
 
-    #[test]
-    fn groups_siblings_with_full_destinations_and_directories_before_leaves() {
-        let entries = ["a", "z/b", "z/c"]
-            .into_iter()
-            .enumerate()
-            .map(|(position, path)| {
-                (
-                    Path::new("/config").join(path),
-                    radix::Entry {
-                        dst_root: Some("/config".into()),
-                        index: ([0], [position]).into(),
-                        src: Path::new("/shed").join(path),
-                    },
-                )
-            })
-            .collect();
+    #[tokio::test]
+    async fn groups_siblings_with_full_destinations_and_directories_before_leaves() {
+        let temp_dir = TempDir::new().unwrap();
+        let path_dir = temp_dir.path().join("path");
+        let shed_dir = temp_dir.path().join("shed");
 
-        assert_eq!(
-            build_roots(entries),
-            vec![Node::Directory {
-                dst: "/config".into(),
+        let path_dir_display = path_dir.display();
+        let manifest_path = testing_m::write_yaml_manifest(
+            &shed_dir,
+            "manifest",
+            formatdoc! {"
+              path: {path_dir_display}
+              items:
+                - a
+                - z/b
+                - z/c
+            "},
+        );
+        let manifest_directory = manifest_path.parent().unwrap().to_path_buf();
+
+        let (manifests, resolve_events) = testing_m::resolve(vec![Input {
+            name: "manifest".into(),
+            path: manifest_path,
+        }])
+        .await;
+
+        testing_m::assert_events_contain_no_errors(&resolve_events);
+        testing_m::assert_events_contain_done_last(&resolve_events);
+
+        let actual = plan(Direction::Get, &manifests);
+        let expected = Plan {
+            roots: vec![Node::Directory {
+                dst: path_dir.clone(),
                 nodes: vec![
                     Node::Directory {
-                        dst: "/config/z".into(),
+                        dst: path_dir.join("z"),
                         nodes: vec![
                             Node::Leaf {
                                 index: ([0], [1]).into(),
-                                src: "/shed/z/b".into(),
-                                dst: "/config/z/b".into(),
+                                src: manifest_directory.join("z/b"),
+                                dst: path_dir.join("z/b"),
                             },
                             Node::Leaf {
                                 index: ([0], [2]).into(),
-                                src: "/shed/z/c".into(),
-                                dst: "/config/z/c".into(),
+                                src: manifest_directory.join("z/c"),
+                                dst: path_dir.join("z/c"),
                             },
                         ],
                     },
                     Node::Leaf {
                         index: ([0], [0]).into(),
-                        src: "/shed/a".into(),
-                        dst: "/config/a".into(),
+                        src: manifest_directory.join("a"),
+                        dst: path_dir.join("a"),
                     },
                 ],
-            }]
-        );
+            }],
+            errors: Vec::new(),
+        };
+        assert_eq!(actual, expected);
     }
 
     #[tokio::test]
@@ -249,10 +264,7 @@ mod tests {
                   shed: leaf2
             "},
         );
-        let manifest_directory = manifest_path
-            .parent()
-            .expect("a manifest path has a parent")
-            .to_path_buf();
+        let manifest_directory = manifest_path.parent().unwrap().to_path_buf();
 
         let (manifests, resolve_events) = testing_m::resolve(vec![Input {
             name: "manifest".into(),
@@ -299,10 +311,7 @@ mod tests {
                 - leaf2
             "},
         );
-        let manifest_directory = manifest_path
-            .parent()
-            .expect("a manifest path has a parent")
-            .to_path_buf();
+        let manifest_directory = manifest_path.parent().unwrap().to_path_buf();
 
         let (manifests, resolve_events) = testing_m::resolve(vec![Input {
             name: "manifest".into(),
@@ -357,10 +366,7 @@ mod tests {
                             - leaf2
             "},
         );
-        let manifest_directory = manifest_path
-            .parent()
-            .expect("a manifest path has a parent")
-            .to_path_buf();
+        let manifest_directory = manifest_path.parent().unwrap().to_path_buf();
 
         let (manifests, resolve_events) = testing_m::resolve(vec![Input {
             name: "manifest".into(),
@@ -416,10 +422,7 @@ mod tests {
                 - leaf2
             "},
         );
-        let manifest_directory = manifest_path
-            .parent()
-            .expect("a manifest path has a parent")
-            .to_path_buf();
+        let manifest_directory = manifest_path.parent().unwrap().to_path_buf();
 
         let (manifests, resolve_events) = testing_m::resolve(vec![Input {
             name: "manifest".into(),
@@ -486,10 +489,7 @@ mod tests {
                 - top-leaf
             "},
         );
-        let manifest_directory = main_manifest_path
-            .parent()
-            .expect("a manifest path has a parent")
-            .to_path_buf();
+        let manifest_directory = main_manifest_path.parent().unwrap().to_path_buf();
 
         let (manifests, resolve_events) = testing_m::resolve(vec![Input {
             name: "manifest".into(),
@@ -562,10 +562,7 @@ mod tests {
                 - sub-dir2-leaf
             "},
         );
-        let manifest_directory = main_manifest_path
-            .parent()
-            .expect("a manifest path has a parent")
-            .to_path_buf();
+        let manifest_directory = main_manifest_path.parent().unwrap().to_path_buf();
 
         let (manifests, resolve_events) = testing_m::resolve(vec![Input {
             name: "main-manifest".into(),
@@ -621,10 +618,7 @@ mod tests {
                   shed: leaf2
             "},
         );
-        let manifest_directory = manifest_path
-            .parent()
-            .expect("a manifest path has a parent")
-            .to_path_buf();
+        let manifest_directory = manifest_path.parent().unwrap().to_path_buf();
 
         let (manifests, resolve_events) = testing_m::resolve(vec![Input {
             name: "manifest".into(),
@@ -669,10 +663,7 @@ mod tests {
                   shed: descendant-leaf
             "},
         );
-        let manifest_directory = manifest_path
-            .parent()
-            .expect("a manifest path has a parent")
-            .to_path_buf();
+        let manifest_directory = manifest_path.parent().unwrap().to_path_buf();
 
         let (manifests, resolve_events) = testing_m::resolve(vec![Input {
             name: "manifest".into(),
@@ -717,10 +708,7 @@ mod tests {
                       shed: {shed_dir_display}/invalid-leaf
             "},
         );
-        let manifest_directory = manifest_path
-            .parent()
-            .expect("a manifest path has a parent")
-            .to_path_buf();
+        let manifest_directory = manifest_path.parent().unwrap().to_path_buf();
 
         let (manifests, resolve_events) = testing_m::resolve(vec![Input {
             name: "manifest".into(),
@@ -743,6 +731,107 @@ mod tests {
             }],
             errors: vec![Error::NonRootPathShedBothAbsolute {
                 index: ([0], [0, 1]).into(),
+            }],
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
+    async fn plans_normalized_manifest_shed_and_item_paths_for_put() {
+        let temp_dir = TempDir::new().unwrap();
+        let shed_dir = temp_dir.path().join("shed");
+
+        let manifest_path = testing_m::write_yaml_manifest(
+            &shed_dir,
+            "manifest",
+            formatdoc! {"
+              path: $HOME/.config/app
+              shed: ../app
+              items:
+                - config
+                - dir/../schema
+            "},
+        );
+        let manifest_directory = manifest_path.parent().unwrap().to_path_buf();
+        let app_dir = manifest_directory.parent().unwrap().join("app");
+
+        let (manifests, resolve_events) = testing_m::resolve(vec![Input {
+            name: "manifest".into(),
+            path: manifest_path,
+        }])
+        .await;
+
+        testing_m::assert_events_contain_no_errors(&resolve_events);
+        testing_m::assert_events_contain_done_last(&resolve_events);
+
+        let home = PathBuf::from(std::env::var("HOME").unwrap());
+        let actual = plan(Direction::Put, &manifests);
+        let expected = Plan {
+            roots: vec![Node::Directory {
+                dst: app_dir.clone(),
+                nodes: vec![
+                    Node::Leaf {
+                        index: ([0], [0]).into(),
+                        src: home.join(".config/app/config"),
+                        dst: app_dir.join("config"),
+                    },
+                    Node::Leaf {
+                        index: ([0], [1]).into(),
+                        src: home.join(".config/app/schema"),
+                        dst: app_dir.join("schema"),
+                    },
+                ],
+            }],
+            errors: Vec::new(),
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
+    async fn omits_leaves_escaping_the_manifest_destination_root_and_plans_valid_siblings_for_get() {
+        let temp_dir = TempDir::new().unwrap();
+        let shed_dir = temp_dir.path().join("shed");
+
+        let manifest_path = testing_m::write_yaml_manifest(
+            &shed_dir,
+            "manifest",
+            formatdoc! {"
+              path: $HOME/.config/app
+              shed: ../app
+              items:
+                - ../escaping-leaf
+                - normal leaf
+            "},
+        );
+        let manifest_directory = manifest_path.parent().unwrap().to_path_buf();
+        let app_dir = manifest_directory.parent().unwrap().join("app");
+
+        let (manifests, resolve_events) = testing_m::resolve(vec![Input {
+            name: "manifest".into(),
+            path: manifest_path,
+        }])
+        .await;
+
+        testing_m::assert_events_contain_no_errors(&resolve_events);
+        testing_m::assert_events_contain_done_last(&resolve_events);
+
+        let home = PathBuf::from(std::env::var("HOME").unwrap());
+        let dst_root = home.join(".config/app");
+
+        let actual = plan(Direction::Get, &manifests);
+        let expected = Plan {
+            roots: vec![Node::Directory {
+                dst: dst_root.clone(),
+                nodes: vec![Node::Leaf {
+                    index: ([0], [1]).into(),
+                    src: app_dir.join("normal leaf"),
+                    dst: dst_root.join("normal leaf"),
+                }],
+            }],
+            errors: vec![Error::DestinationOutsideRoot {
+                index: ([0], [0]).into(),
+                root: dst_root,
+                dst: home.join(".config/escaping-leaf"),
             }],
         };
         assert_eq!(actual, expected);

@@ -1,6 +1,13 @@
-use super::super::{error::Error, model::Direction};
+use super::super::{
+    error::{Error, PathField},
+    model::Direction,
+};
 use super::model::{Entry, Plan};
-use crate::manifest::{FullIndex, Index, Item, ItemKind, Manifest};
+use crate::{
+    manifest::{FullIndex, Index, Item, ItemKind, Manifest},
+    util,
+};
+use path_clean::PathClean;
 use std::path::{Path, PathBuf};
 
 pub(in crate::traversal) struct Planner {
@@ -33,17 +40,37 @@ impl Planner {
             .parent()
             .expect("a resolved manifest location has a parent");
 
-        let path = manifest
+        let full_index = FullIndex {
+            manifest: index.clone(),
+            item: Vec::new(),
+        };
+
+        let path = match manifest
             .path
             .as_deref()
-            .map(PathBuf::from)
-            .unwrap_or_default();
+            .map(|path| Self::expand_path(&full_index, PathField::Path, path))
+            .transpose()
+        {
+            Ok(path) => path.unwrap_or_default(),
+            Err(error) => {
+                plan.errors.push(error);
+                return;
+            }
+        }.clean();
 
-        let shed = manifest
+        let shed = match manifest
             .shed
             .as_deref()
-            .map(|shed| directory.join(shed))
-            .unwrap_or_else(|| directory.to_path_buf());
+            .map(|shed| Self::expand_path(&full_index, PathField::Shed, shed))
+            .transpose()
+        {
+            Ok(Some(shed)) => directory.join(shed),
+            Ok(None) => directory.to_path_buf(),
+            Err(error) => {
+                plan.errors.push(error);
+                return;
+            }
+        }.clean();
 
         self.plan_manifests(plan, index.clone(), &manifest.manifests);
 
@@ -110,11 +137,28 @@ impl Planner {
         dst_root: Option<&Path>,
         item: &Item,
     ) {
-        let path_is_absolute = Path::new(&item.path).is_absolute();
-        let shed_is_absolute = item
+        let item_path = match Self::expand_path(&index, PathField::Path, &item.path) {
+            Ok(path) => path,
+            Err(error) => {
+                plan.errors.push(error);
+                return;
+            }
+        };
+        let item_shed = match item
             .shed
             .as_deref()
-            .is_some_and(|shed| Path::new(shed).is_absolute());
+            .map(|shed| Self::expand_path(&index, PathField::Shed, shed))
+            .transpose()
+        {
+            Ok(shed) => shed,
+            Err(error) => {
+                plan.errors.push(error);
+                return;
+            }
+        };
+
+        let path_is_absolute = item_path.is_absolute();
+        let shed_is_absolute = item_shed.as_deref().is_some_and(Path::is_absolute);
 
         if index.item.len() > 1 && path_is_absolute && shed_is_absolute {
             plan.errors
@@ -122,12 +166,13 @@ impl Planner {
             return;
         }
 
-        let path = path_parent.join(&item.path);
-        let shed = match &item.shed {
+        let path = path_parent.join(item_path).clean();
+        let shed = match item_shed {
             Some(shed) => shed_parent.join(shed),
             None if Path::new(&item.path).is_absolute() => shed_parent.to_path_buf(),
             None => shed_parent.join(&item.path),
-        };
+        }
+        .clean();
 
         if let Some(children) = &item.items {
             let child_dst_root = match dst_root {
@@ -142,6 +187,17 @@ impl Planner {
         } else {
             let (src, dst) = self.direction.resolve(path, shed);
 
+            if let Some(root) = dst_root
+                && !dst.starts_with(root)
+            {
+                plan.errors.push(Error::DestinationOutsideRoot {
+                    index,
+                    root: root.to_path_buf(),
+                    dst,
+                });
+                return;
+            }
+
             let mut entries = plan.radix.get(&dst).cloned().unwrap_or_default();
             entries.push(Entry {
                 dst_root: dst_root.map(Path::to_path_buf),
@@ -151,11 +207,24 @@ impl Planner {
             plan.radix.insert(&dst, entries);
         }
     }
+
+    fn expand_path(
+        index: &FullIndex,
+        field: PathField,
+        path: impl AsRef<Path>,
+    ) -> Result<PathBuf, Error> {
+        util::path::expand(path).map_err(|source| Error::Expansion {
+            index: index.clone(),
+            field,
+            source,
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn preserves_a_declared_manifest_destination_root() {
@@ -194,8 +263,8 @@ mod tests {
             ),
         ];
 
-        assert_eq!(actual, expected);
         assert_eq!(errors, vec![]);
+        assert_eq!(actual, expected);
     }
 
     #[test]
@@ -246,7 +315,61 @@ mod tests {
             ),
         ];
 
-        assert_eq!(actual, expected);
         assert_eq!(errors, vec![]);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn expands_manifest_root_and_normalizes_joined_item_paths() {
+        let manifest = Manifest {
+            name: "manifest".into(),
+            location: "/dotfiles/shed/manifest.yaml".into(),
+            path: Some("$HOME/.config/app".into()),
+            shed: Some("../app".into()),
+            manifests: Vec::new(),
+            items: vec![
+                ItemKind::Item(Item {
+                    path: "config".into(),
+                    shed: None,
+                    items: None,
+                }),
+                ItemKind::Item(Item {
+                    path: "dir/../schema".into(),
+                    shed: None,
+                    items: None,
+                }),
+            ],
+        };
+
+        let Plan { radix, errors } = Planner::new(Direction::Get).plan(&[manifest]);
+        let actual = radix
+            .range::<Path, _>(..)
+            .map(|(components, entries)| {
+                (components.into_iter().collect::<PathBuf>(), entries.clone())
+            })
+            .collect::<Vec<_>>();
+        let home = PathBuf::from(std::env::var("HOME").unwrap());
+        let dst_root = home.join(".config/app");
+        let expected = vec![
+            (
+                dst_root.join("config"),
+                vec![Entry {
+                    dst_root: Some(dst_root.clone()),
+                    index: ([0], [0]).into(),
+                    src: "/dotfiles/app/config".into(),
+                }],
+            ),
+            (
+                dst_root.join("schema"),
+                vec![Entry {
+                    dst_root: Some(dst_root),
+                    index: ([0], [1]).into(),
+                    src: "/dotfiles/app/schema".into(),
+                }],
+            ),
+        ];
+
+        assert_eq!(errors, vec![]);
+        assert_eq!(actual, expected);
     }
 }
