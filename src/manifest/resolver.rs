@@ -62,7 +62,7 @@ impl Resolver {
         index: Index,
         input: Input,
     ) -> Manifest {
-        self.send_event(Event::Started {
+        self.send_event(Event::ResolutionStarted {
             index: index.clone(),
         })
         .await;
@@ -117,7 +117,8 @@ impl Resolver {
         }))
         .await;
 
-        self.send_event(Event::Resolved { index }).await;
+        self.send_event(Event::ResolutionFinished { index, error: None })
+            .await;
         Manifest {
             name: input.name,
             location: input.path,
@@ -200,7 +201,11 @@ impl Resolver {
     }
 
     async fn error_resolution(&self, index: Index, input: Input, error: Error) -> Manifest {
-        self.send_event(Event::Error { index, error }).await;
+        self.send_event(Event::ResolutionFinished {
+            index,
+            error: Some(error),
+        })
+        .await;
         Manifest {
             name: input.name,
             location: input.path,
@@ -316,9 +321,9 @@ mod tests {
         );
         assert!(events.iter().any(|event| matches!(
             event,
-            Event::Error {
+            Event::ResolutionFinished {
                 index,
-                error: Error::Io { .. },
+                error: Some(Error::Io { .. }),
             } if index.as_slice() == [0]
         )));
         assert_events_contain_done_last(&events);
@@ -393,9 +398,9 @@ mod tests {
 
         assert!(events.iter().any(|event| matches!(
             event,
-            Event::Error {
+            Event::ResolutionFinished {
                 index,
-                error: Error::Cycle { start_index },
+                error: Some(Error::Cycle { start_index }),
             } if index.as_slice() == [0, 0, 0, 0] && start_index.as_slice() == [0]
         )));
         assert_events_contain_done_last(&events);

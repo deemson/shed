@@ -32,14 +32,14 @@ pub(crate) fn write_yaml_manifest<C: AsRef<[u8]>>(
 #[track_caller]
 pub(crate) fn assert_events_contain_started(events: &[Event], expected_index: &[usize]) {
     assert!(events.iter().any(|event| {
-        matches!(event, Event::Started { index } if index.as_slice() == expected_index)
+        matches!(event, Event::ResolutionStarted { index } if index.as_slice() == expected_index)
     }));
 }
 
 #[track_caller]
 pub(crate) fn assert_events_contain_resolved(events: &[Event], expected_index: &[usize]) {
     assert!(events.iter().any(|event| {
-        matches!(event, Event::Resolved { index } if index.as_slice() == expected_index)
+        matches!(event, Event::ResolutionFinished { index, error: None } if index.as_slice() == expected_index)
     }));
 }
 
@@ -48,7 +48,7 @@ pub(crate) fn assert_events_contain_no_errors(events: &[Event]) {
     assert!(
         !events
             .iter()
-            .any(|event| matches!(event, Event::Error { .. }))
+            .any(|event| matches!(event, Event::ResolutionFinished { error: Some(_), .. }))
     );
 }
 
