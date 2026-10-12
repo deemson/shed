@@ -1,4 +1,12 @@
-pub type Index = Vec<usize>;
+pub type IndexBit = usize;
+
+pub type IndexRef<'a> = &'a [IndexBit];
+pub struct FullIndexRef<'a> {
+    pub manifest: IndexRef<'a>,
+    pub item: IndexRef<'a>,
+}
+
+pub type Index = Vec<IndexBit>;
 
 #[derive(Debug, Eq, Hash, PartialEq, Clone)]
 pub struct FullIndex {
@@ -6,10 +14,19 @@ pub struct FullIndex {
     pub item: Index,
 }
 
+impl FullIndex {
+    pub fn as_ref(&self) -> FullIndexRef<'_> {
+        FullIndexRef {
+            manifest: &self.manifest,
+            item: &self.item,
+        }
+    }
+}
+
 impl<M, I> From<(M, I)> for FullIndex
 where
-    M: IntoIterator<Item = usize>,
-    I: IntoIterator<Item = usize>,
+    M: IntoIterator<Item = IndexBit>,
+    I: IntoIterator<Item = IndexBit>,
 {
     fn from((manifest, item): (M, I)) -> Self {
         Self {

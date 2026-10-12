@@ -1,4 +1,5 @@
 pub mod error;
+pub use self::error::*;
 pub mod event;
 pub use self::event::*;
 pub mod index;

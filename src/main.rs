@@ -1,6 +1,7 @@
 mod cli;
 mod execution;
 mod manifest;
+mod reporting;
 mod scanning;
 mod traversal;
 mod util;
@@ -41,15 +42,24 @@ async fn run(args: &PutGetArgs, direction: traversal::Direction) {
     let (resolve_sender, mut resolve_receiver) = mpsc::channel(32);
     let resolver = manifest::Resolver::new(resolve_sender);
     let consume_resolve_events = async {
+        let mut events = Vec::new();
         while let Some(event) = resolve_receiver.recv().await {
-            if matches!(event, manifest::Event::Done) {
+            let done = matches!(event, manifest::Event::Done);
+            events.push(event);
+
+            if done {
                 break;
             }
         }
+        events
     };
-    let (manifests, ()) = tokio::join!(resolver.resolve(resolve_inputs), consume_resolve_events);
+    let (manifests, manifest_events) =
+        tokio::join!(resolver.resolve(resolve_inputs), consume_resolve_events);
 
-    // dbg!(&manifests);
+    println!(
+        "{}",
+        reporting::ultimate::Report::from(manifests.as_slice()).render()
+    );
 
     let plan = traversal::plan(direction, &manifests);
 
@@ -86,7 +96,7 @@ async fn run(args: &PutGetArgs, direction: traversal::Direction) {
         events
     };
 
-    let ((), execute_events) = tokio::join!(executor.execute(&scan), consume_execute_events);
+    let ((), _execute_events) = tokio::join!(executor.execute(&scan), consume_execute_events);
 
-    dbg!(execute_events);
+    // dbg!(execute_events);
 }

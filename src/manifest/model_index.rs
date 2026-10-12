@@ -1,8 +1,11 @@
-use super::model::Manifest;
-use super::yaml::{Item, ItemKind};
+use super::{
+    index::*,
+    model::Manifest,
+    yaml::{Item, ItemKind},
+};
 
 impl Manifest {
-    pub fn get(&self, indexes: &[usize]) -> &Manifest {
+    pub fn get(&self, indexes: IndexRef) -> &Manifest {
         indexes
             .iter()
             .fold(self, |manifest, &index| &manifest.manifests[index])
@@ -10,7 +13,7 @@ impl Manifest {
 }
 
 impl Item {
-    pub fn get(&self, indexes: &[usize]) -> &ItemKind {
+    pub fn get(&self, indexes: IndexRef) -> &ItemKind {
         let item = &self.items.as_ref().expect("item has no children")[indexes[0]];
 
         indexes[1..].iter().fold(item, |item, &index| {
