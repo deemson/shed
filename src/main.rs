@@ -2,6 +2,7 @@ mod cli;
 mod execution;
 mod manifest;
 mod reporting;
+mod reporting2;
 mod scanning;
 mod traversal;
 mod util;
@@ -56,12 +57,10 @@ async fn run(args: &PutGetArgs, direction: traversal::Direction) {
     let (manifests, manifest_events) =
         tokio::join!(resolver.resolve(resolve_inputs), consume_resolve_events);
 
-    println!(
-        "{}",
-        reporting::ultimate::Report::from(manifests.as_slice()).render()
-    );
 
     let plan = traversal::plan(direction, &manifests);
+
+    println!("{}", reporting2::summary::Report::new(manifests).render());
 
     // dbg!(&plan);
 
