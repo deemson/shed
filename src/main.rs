@@ -2,7 +2,6 @@ mod cli;
 mod execution;
 mod manifest;
 mod reporting;
-mod reporting2;
 mod scanning;
 mod traversal;
 mod util;
@@ -60,9 +59,8 @@ async fn run(args: &PutGetArgs, direction: traversal::Direction) {
 
     let plan = traversal::plan(direction, &manifests);
     
-    let mut report = reporting2::summary::Report::new(manifests);
+    let mut report = reporting::summary::Report::new(manifests);
     report.resolution(manifest_events);
-    dbg!(&plan);
     report.traversal(plan);
 
     println!("{}", report.render());
