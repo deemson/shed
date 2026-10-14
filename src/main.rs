@@ -59,8 +59,11 @@ async fn run(args: &PutGetArgs, direction: traversal::Direction) {
 
 
     let plan = traversal::plan(direction, &manifests);
+    
+    let mut report = reporting2::summary::Report::new(manifests);
+    report.resolution(manifest_events);
 
-    println!("{}", reporting2::summary::Report::new(manifests).render());
+    println!("{}", report.render());
 
     // dbg!(&plan);
 
