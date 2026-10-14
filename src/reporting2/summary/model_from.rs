@@ -16,6 +16,7 @@ impl From<manifest::Manifest> for Manifest {
 impl From<manifest::ItemKind> for Item {
     fn from(item: manifest::ItemKind) -> Self {
         Self {
+            error: None,
             items: match item {
                 manifest::ItemKind::Path(_) => Vec::new(),
                 manifest::ItemKind::Item(item) => {

@@ -21,5 +21,6 @@ pub enum ManifestStatus {
 
 #[derive(Debug)]
 pub struct Item {
+    pub error: Option<String>,
     pub items: Vec<Item>,
 }

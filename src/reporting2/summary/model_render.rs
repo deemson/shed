@@ -12,7 +12,7 @@ impl Report {
 }
 
 impl Manifest {
-    pub fn lines(self) -> Vec<String> {
+    fn lines(self) -> Vec<String> {
         let mut lines = Vec::new();
 
         lines.push(self.name.as_str().bold().to_string());
@@ -35,6 +35,23 @@ impl Manifest {
             }
         }
 
+        for item in self.items.into_iter() {
+            lines.extend(item.lines());
+        }
+
+        lines
+    }
+}
+
+impl Item {
+    fn lines(self) -> Vec<String> {
+        let mut lines = Vec::new();
+        if let Some(error) = self.error {
+            lines.push(error.red().to_string());
+        }
+        for item in self.items.into_iter() {
+            lines.extend(item.lines());
+        }
         lines
     }
 }

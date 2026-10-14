@@ -62,43 +62,45 @@ async fn run(args: &PutGetArgs, direction: traversal::Direction) {
     
     let mut report = reporting2::summary::Report::new(manifests);
     report.resolution(manifest_events);
+    dbg!(&plan);
+    report.traversal(plan);
 
     println!("{}", report.render());
 
     // dbg!(&plan);
 
-    let (scan_sender, mut scan_receiver) = mpsc::channel(32);
-    let scanner = scanning::Scanner::new(scan_sender);
-    let consume_scan_events = async {
-        while let Some(event) = scan_receiver.recv().await {
-            if matches!(event, scanning::Event::Done) {
-                break;
-            }
-        }
-    };
-    let (scan, ()) = tokio::join!(scanner.scan(plan.roots), consume_scan_events);
+    // let (scan_sender, mut scan_receiver) = mpsc::channel(32);
+    // let scanner = scanning::Scanner::new(scan_sender);
+    // let consume_scan_events = async {
+    //     while let Some(event) = scan_receiver.recv().await {
+    //         if matches!(event, scanning::Event::Done) {
+    //             break;
+    //         }
+    //     }
+    // };
+    // let (scan, ()) = tokio::join!(scanner.scan(plan.roots), consume_scan_events);
 
     // dbg!(&scan);
 
-    let (execute_sender, mut execute_receiver) = mpsc::channel(32);
-    let executor = execution::Executor::new(true, execute_sender);
-
-    let consume_execute_events = async {
-        let mut events = Vec::new();
-
-        while let Some(event) = execute_receiver.recv().await {
-            let done = matches!(event, execution::Event::Done);
-            events.push(event);
-
-            if done {
-                break;
-            }
-        }
-
-        events
-    };
-
-    let ((), _execute_events) = tokio::join!(executor.execute(&scan), consume_execute_events);
+    // let (execute_sender, mut execute_receiver) = mpsc::channel(32);
+    // let executor = execution::Executor::new(true, execute_sender);
+    //
+    // let consume_execute_events = async {
+    //     let mut events = Vec::new();
+    //
+    //     while let Some(event) = execute_receiver.recv().await {
+    //         let done = matches!(event, execution::Event::Done);
+    //         events.push(event);
+    //
+    //         if done {
+    //             break;
+    //         }
+    //     }
+    //
+    //     events
+    // };
+    //
+    // let ((), _execute_events) = tokio::join!(executor.execute(&scan), consume_execute_events);
 
     // dbg!(execute_events);
 }
