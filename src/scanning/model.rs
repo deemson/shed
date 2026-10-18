@@ -22,6 +22,12 @@ pub enum Node {
 
 #[derive(Debug, PartialEq)]
 pub enum Entry {
-    Directory { dst: PathBuf, entries: Vec<Entry> },
-    File { src: PathBuf, dst: PathBuf },
+    Directory {
+        dst: PathBuf,
+        entries: Vec<Entry>,
+    },
+    File {
+        src: PathBuf,
+        dst: PathBuf,
+    },
 }

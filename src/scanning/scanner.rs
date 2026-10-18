@@ -37,34 +37,56 @@ impl Scanner {
                 nodes: self.scan_nodes(nodes).await,
             }),
             traversal::Node::Leaf { index, src, dst } => {
+                self.send_event(Event::NodeScanningStarted {
+                    index: index.clone(),
+                })
+                .await;
                 let metadata = match tokio::fs::symlink_metadata(&src).await {
                     Ok(metadata) => metadata,
                     Err(source) => {
-                        self.send_event(Event::Error {
+                        self.send_event(Event::NodeScanningFinished {
                             index,
-                            error: Error::MetadataIo { path: src, source },
+                            error: Some(Error::MetadataIo { path: src, source }),
                         })
                         .await;
                         return None;
                     }
                 };
                 if metadata.is_file() {
-                    return Some(Node::ReplaceFile { index, src, dst });
+                    let node = Some(Node::ReplaceFile {
+                        index: index.clone(),
+                        src,
+                        dst,
+                    });
+                    self.send_event(Event::NodeScanningFinished { index, error: None })
+                        .await;
+                    return node;
                 }
                 if metadata.is_dir() {
-                    let entries = self.scan_entries(&index, &src, &dst).await?;
-                    return Some(Node::ReplaceDirectory {
-                        index,
+                    let entries = match self.scan_entries(&index, &dst, &src, &dst).await {
+                        Ok(entries) => entries,
+                        Err(error) => {
+                            self.send_event(Event::NodeScanningFinished {
+                                index,
+                                error: Some(error),
+                            })
+                            .await;
+                            return None;
+                        }
+                    };
+                    let node = Some(Node::ReplaceDirectory {
+                        index: index.clone(),
                         src,
                         dst,
                         entries,
                     });
+                    self.send_event(Event::NodeScanningFinished { index, error: None })
+                        .await;
+                    return node;
                 }
-                self.send_event(Event::Error {
+                self.send_event(Event::NodeScanningFinished {
                     index,
-                    error: Error::UnsupportedFileType {
-                        path: src,
-                    },
+                    error: Some(Error::UnsupportedFileType { path: src }),
                 })
                 .await;
                 None
@@ -75,21 +97,17 @@ impl Scanner {
     pub async fn scan_entries(
         &self,
         index: &FullIndex,
+        parent_node_dst: &Path,
         src: &Path,
         dst: &Path,
-    ) -> Option<Vec<Entry>> {
+    ) -> Result<Vec<Entry>, Error> {
         let mut read_dir = match tokio::fs::read_dir(src).await {
             Ok(read_dir) => read_dir,
             Err(source) => {
-                self.send_event(Event::Error {
-                    index: index.clone(),
-                    error: Error::ReadDirIo {
-                        path: src.to_path_buf(),
-                        source,
-                    },
-                })
-                .await;
-                return None;
+                return Err(Error::ReadDirIo {
+                    path: src.to_path_buf(),
+                    source,
+                });
             }
         };
 
@@ -98,15 +116,10 @@ impl Scanner {
             match result {
                 Ok(entry) => child_srcs.push(entry.path()),
                 Err(source) => {
-                    self.send_event(Event::Error {
-                        index: index.clone(),
-                        error: Error::ReadDirIo {
-                            path: src.to_path_buf(),
-                            source,
-                        },
-                    })
-                    .await;
-                    return None;
+                    return Err(Error::ReadDirIo {
+                        path: src.to_path_buf(),
+                        source,
+                    });
                 }
             }
         }
@@ -117,46 +130,89 @@ impl Scanner {
                 .file_name()
                 .expect("a directory entry has a filename");
             let child_dst = dst.join(filename);
-            self.scan_entry(index, child_src, &child_dst).await
+            self.scan_entry(index, parent_node_dst, child_src, &child_dst)
+                .await
         }))
         .await;
 
-        Some(entries.into_iter().flatten().collect())
+        Ok(entries.into_iter().flatten().collect())
     }
 
-    pub async fn scan_entry(&self, index: &FullIndex, src: &Path, dst: &Path) -> Option<Entry> {
+    pub async fn scan_entry(
+        &self,
+        index: &FullIndex,
+        parent_node_dst: &Path,
+        src: &Path,
+        dst: &Path,
+    ) -> Option<Entry> {
+        let rel = dst
+            .strip_prefix(parent_node_dst)
+            .expect("must be node's child")
+            .to_path_buf();
+        self.send_event(Event::EntryScanningStarted {
+            index: index.to_owned(),
+            rel: rel.clone(),
+        })
+        .await;
         let metadata = match tokio::fs::symlink_metadata(src).await {
             Ok(metadata) => metadata,
             Err(source) => {
-                self.send_event(Event::Error {
+                self.send_event(Event::EntryScanningFinished {
                     index: index.clone(),
-                    error: Error::MetadataIo {
+                    rel,
+                    error: Some(Error::MetadataIo {
                         path: src.to_path_buf(),
                         source,
-                    },
+                    }),
                 })
                 .await;
                 return None;
             }
         };
         if metadata.is_dir() {
-            let entries = self.scan_entries(index, src, dst).await?;
-            return Some(Entry::Directory {
+            let entries = match self.scan_entries(index, parent_node_dst, src, dst).await {
+                Ok(entries) => entries,
+                Err(error) => {
+                    self.send_event(Event::EntryScanningFinished {
+                        index: index.clone(),
+                        rel,
+                        error: Some(error),
+                    })
+                    .await;
+                    return None;
+                }
+            };
+            let entry = Some(Entry::Directory {
                 dst: dst.to_path_buf(),
                 entries,
             });
+            self.send_event(Event::EntryScanningFinished {
+                index: index.to_owned(),
+                rel,
+                error: None,
+            })
+            .await;
+            return entry;
         }
         if metadata.is_file() {
-            return Some(Entry::File {
+            let entry = Some(Entry::File {
                 src: src.to_path_buf(),
                 dst: dst.to_path_buf(),
             });
+            self.send_event(Event::EntryScanningFinished {
+                index: index.to_owned(),
+                rel,
+                error: None,
+            })
+            .await;
+            return entry;
         }
-        self.send_event(Event::Error {
+        self.send_event(Event::EntryScanningFinished {
             index: index.clone(),
-            error: Error::UnsupportedFileType {
+            rel,
+            error: Some(Error::UnsupportedFileType {
                 path: src.to_path_buf(),
-            },
+            }),
         })
         .await;
         None

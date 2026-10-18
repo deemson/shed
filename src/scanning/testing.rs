@@ -28,9 +28,11 @@ pub(crate) async fn scan(
 #[track_caller]
 pub(crate) fn assert_events_contain_no_errors(events: &[Event]) {
     assert!(
-        !events
-            .iter()
-            .any(|event| matches!(event, Event::Error { .. }))
+        !events.iter().any(|event| matches!(
+            event,
+            Event::NodeScanningFinished { error: Some(_), .. }
+                | Event::EntryScanningFinished { error: Some(_), .. }
+        ))
     );
 }
 
