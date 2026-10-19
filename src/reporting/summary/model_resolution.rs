@@ -7,7 +7,6 @@ impl Report {
             self.resolution_event(event);
         }
     }
-
     fn resolution_event(&mut self, event: manifest::Event) {
         match event {
             manifest::Event::ResolutionStarted { index } => {
@@ -25,18 +24,12 @@ impl Report {
 
 impl Manifest {
     fn resolution_started(&mut self) {
-        match self.status {
-            ManifestStatus::Initial => self.status = ManifestStatus::ResolutionStarted,
-            ManifestStatus::ResolutionStarted => panic!("resolution already started"),
-            ManifestStatus::ResolutionFinished => panic!("resolution already finished"),
-        }
+        assert_eq!(self.status, ManifestStatus::Initial);
+        self.status = ManifestStatus::Resolving
     }
     fn resolution_finished(&mut self, error: Option<manifest::Error>) {
-        match self.status {
-            ManifestStatus::Initial => panic!("resolution did not start"),
-            ManifestStatus::ResolutionStarted => self.status = ManifestStatus::ResolutionFinished,
-            ManifestStatus::ResolutionFinished => panic!("resolution already finished"),
-        }
-        self.error = error.map(|error| error.to_string())
+        assert_eq!(self.status, ManifestStatus::Resolving);
+        self.error = error.map(|error| error.to_string());
+        self.status = ManifestStatus::Resolved;
     }
 }

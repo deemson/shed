@@ -3,7 +3,7 @@ use crate::traversal;
 
 impl Report {
     pub fn traversal(&mut self, plan: traversal::Plan) {
-        let mut overlap_group = 0;
+        let mut overlap_group = 1;
         for error in plan.errors {
             let error_string = error.to_string();
             match error {
@@ -19,7 +19,7 @@ impl Report {
                 traversal::Error::OverlappingLeaves { indexes } => {
                     for index in indexes {
                         let item = self.get_item_mut(index.as_ref());
-                        item.error = Some(format!("overlap group {overlap_group}"));
+                        item.error = Some(format!("overlap #{overlap_group}"));
                     }
                     overlap_group += 1;
                 }

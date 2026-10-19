@@ -31,6 +31,12 @@ pub struct PutGetArgs {
     pub manifests: Vec<PathBuf>,
 }
 
+pub enum StopAt {
+    Resolution,
+    Traversal,
+    Scanning,
+}
+
 #[derive(Subcommand)]
 pub enum ManifestCommand {
     Schema,

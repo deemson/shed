@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 #[derive(Debug)]
 pub struct Report {
     pub manifests: Vec<Manifest>,
@@ -6,21 +8,26 @@ pub struct Report {
 #[derive(Debug)]
 pub struct Manifest {
     pub name: String,
+    pub location: PathBuf,
+    pub path: Option<String>,
+    pub shed: Option<String>,
     pub status: ManifestStatus,
     pub error: Option<String>,
     pub manifests: Vec<Manifest>,
     pub items: Vec<Item>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ManifestStatus {
     Initial,
-    ResolutionStarted,
-    ResolutionFinished,
+    Resolving,
+    Resolved,
 }
 
 #[derive(Debug)]
 pub struct Item {
+    pub path: String,
+    pub shed: Option<String>,
     pub error: Option<String>,
     pub items: Vec<Item>,
 }
