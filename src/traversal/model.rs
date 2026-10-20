@@ -2,7 +2,7 @@ use super::error::Error;
 use crate::manifest::FullIndex;
 use std::path::PathBuf;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Direction {
     Put,
     Get,

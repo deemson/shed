@@ -57,11 +57,11 @@ async fn run(args: &PutGetArgs, direction: traversal::Direction) {
         tokio::join!(resolver.resolve(resolve_inputs), consume_resolve_events);
 
 
-    let plan = traversal::plan(direction, &manifests);
+    let plan = traversal::plan(direction.clone(), &manifests);
     
     let mut report = reporting::summary::Report::new(manifests);
     report.resolution(manifest_events);
-    report.traversal(plan);
+    report.traversal(direction, plan);
 
     println!("{}", report.render());
 

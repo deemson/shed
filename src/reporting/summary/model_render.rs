@@ -1,28 +1,32 @@
 use super::model::*;
+use crate::traversal;
 use colored::Colorize;
+
+struct Context {
+    direction: Option<traversal::Direction>,
+}
 
 impl Report {
     pub fn render(self) -> String {
+        let context = Context {
+            direction: self.direction,
+        };
         self.manifests
             .into_iter()
-            .flat_map(Manifest::lines)
+            .flat_map(|manifest| manifest.lines(&context))
             .collect::<Vec<_>>()
             .join("\n")
     }
 }
 
 impl Manifest {
-    fn lines(self) -> Vec<String> {
+    fn lines(self, context: &Context) -> Vec<String> {
         let mut lines = Vec::new();
 
         lines.push(self.name.as_str().blue().to_string());
 
-        if let Some(path) = self.path {
-            if let Some(shed) = self.shed {
-                lines.push(format!("{shed} ↔ {path}").dimmed().to_string());
-            } else {
-                lines.push(path.dimmed().to_string());
-            }
+        if let Some(line) = self.path_line(context) {
+            lines.push(line);
         }
 
         if let Some(error) = self.error {
@@ -32,35 +36,59 @@ impl Manifest {
         lines.extend(tree_prefix_groups_of_lines(
             self.manifests
                 .into_iter()
-                .map(Manifest::lines)
-                .chain(self.items.into_iter().map(Item::lines))
+                .map(|manifest| manifest.lines(context))
+                .chain(self.items.into_iter().map(|item| item.lines(context)))
                 .collect(),
         ));
 
         lines
     }
+
+    fn path_line(&self, context: &Context) -> Option<String> {
+        let path = self.path.as_ref()?;
+        let direction = match context.direction {
+            None => "↔",
+            Some(traversal::Direction::Put) => "←",
+            Some(traversal::Direction::Get) => "→",
+        };
+        Some(match &self.shed {
+            Some(shed) => format!("{shed} {direction} {path}").dimmed().to_string(),
+            None => path.dimmed().to_string(),
+        })
+    }
 }
 
 impl Item {
-    fn lines(self) -> Vec<String> {
+    fn lines(self, context: &Context) -> Vec<String> {
         let mut lines = Vec::new();
 
-        let path = self.path;
-        if let Some(shed) = self.shed {
-            lines.push(format!("{shed} ↔ {path}"));
-        } else {
-            lines.push(path);
-        }
+        lines.push(self.path_line(context));
 
         if let Some(error) = self.error {
             lines.push(error.red().to_string());
         }
 
         lines.extend(tree_prefix_groups_of_lines(
-            self.items.into_iter().map(Self::lines).collect(),
+            self.items
+                .into_iter()
+                .map(|item| item.lines(context))
+                .collect(),
         ));
 
         lines
+    }
+
+    fn path_line(&self, context: &Context) -> String {
+        let path = &self.path;
+        let direction = match context.direction {
+            None => "↔",
+            Some(traversal::Direction::Put) => "←",
+            Some(traversal::Direction::Get) => "→",
+        };
+        match &self.shed {
+            Some(shed) => format!("{shed} {direction} {path}").to_string(),
+            None => path.to_string(),
+        }
     }
 }
 

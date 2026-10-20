@@ -1,7 +1,9 @@
+use crate::traversal;
 use std::path::PathBuf;
 
 #[derive(Debug)]
 pub struct Report {
+    pub direction: Option<traversal::Direction>,
     pub manifests: Vec<Manifest>,
 }
 
