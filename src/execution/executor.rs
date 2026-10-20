@@ -84,21 +84,15 @@ impl Executor {
                     Self::check_destination_directory(dst),
                 );
 
-                let failed = src_result.is_err() || dst_result.is_err();
+                if let Err(source) = src_result.and(dst_result) {
+                    self.send_event(Event::ReplaceFinished {
+                        index: index.clone(),
+                        src: src.to_path_buf(),
+                        dst: dst.to_path_buf(),
+                        error: Some(Error::ReplaceIo { source }),
+                    })
+                    .await;
 
-                for result in [src_result, dst_result] {
-                    if let Err(source) = result {
-                        self.send_event(Event::ReplaceFinished {
-                            index: index.clone(),
-                            src: src.to_path_buf(),
-                            dst: dst.to_path_buf(),
-                            error: Some(Error::ReplaceIo { source }),
-                        })
-                        .await;
-                    }
-                }
-
-                if failed {
                     return;
                 }
 
@@ -137,21 +131,15 @@ impl Executor {
                     Self::check_destination_file(dst),
                 );
 
-                let failed = src_result.is_err() || dst_result.is_err();
+                if let Err(source) = src_result.and(dst_result) {
+                    self.send_event(Event::ReplaceFinished {
+                        index: index.clone(),
+                        src: src.to_path_buf(),
+                        dst: dst.to_path_buf(),
+                        error: Some(Error::ReplaceIo { source }),
+                    })
+                    .await;
 
-                for result in [src_result, dst_result] {
-                    if let Err(source) = result {
-                        self.send_event(Event::ReplaceFinished {
-                            index: index.clone(),
-                            src: src.to_path_buf(),
-                            dst: dst.to_path_buf(),
-                            error: Some(Error::ReplaceIo { source }),
-                        })
-                        .await;
-                    }
-                }
-
-                if failed {
                     return;
                 }
 
@@ -178,6 +166,8 @@ impl Executor {
                         error: Some(Error::ReplaceIo { source }),
                     })
                     .await;
+
+                    return;
                 }
 
                 self.send_event(Event::ReplaceFinished {
@@ -263,6 +253,8 @@ impl Executor {
                         error: Some(Error::ReplaceIo { source }),
                     })
                     .await;
+
+                    return;
                 }
 
                 self.send_event(Event::ReplaceFinished {
