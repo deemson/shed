@@ -1,6 +1,6 @@
 use super::{error::*, event::*};
 use crate::{
-    manifest::FullIndex,
+    manifest::Index,
     scanning::{self, Node},
 };
 use futures::future::join_all;
@@ -185,7 +185,7 @@ impl Executor {
         &self,
         src_parent: &Path,
         dst_parent: &Path,
-        index: &FullIndex,
+        index: &Index,
         entries: &[scanning::Entry],
     ) {
         join_all(
@@ -200,7 +200,7 @@ impl Executor {
         &self,
         src_parent: &Path,
         dst_parent: &Path,
-        index: &FullIndex,
+        index: &Index,
         entry: &scanning::Entry,
     ) {
         match entry {
@@ -364,19 +364,19 @@ impl Executor {
         Ok(())
     }
 
-    fn collect_node_child_indexes(node: &scanning::Node) -> Vec<FullIndex> {
+    fn collect_node_child_indexes(node: &scanning::Node) -> Vec<Index> {
         let mut indexes = Vec::new();
         Self::subcollect_node_child_indexes(&mut indexes, node);
         indexes
     }
 
-    fn subcollect_nodes_child_indexes(indexes: &mut Vec<FullIndex>, nodes: &[scanning::Node]) {
+    fn subcollect_nodes_child_indexes(indexes: &mut Vec<Index>, nodes: &[scanning::Node]) {
         for node in nodes.iter() {
             Self::subcollect_node_child_indexes(indexes, node);
         }
     }
 
-    fn subcollect_node_child_indexes(indexes: &mut Vec<FullIndex>, node: &scanning::Node) {
+    fn subcollect_node_child_indexes(indexes: &mut Vec<Index>, node: &scanning::Node) {
         match node {
             scanning::Node::EnsureDirectory { nodes, .. } => {
                 Self::subcollect_nodes_child_indexes(indexes, nodes);

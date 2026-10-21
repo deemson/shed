@@ -6,9 +6,8 @@ use std::{
 use futures::future::join_all;
 use tokio::sync::mpsc;
 
-use super::{
-    error::Error, event::Event, index::Index, model::Manifest, yaml::Manifest as UnresolvedManifest,
-};
+use super::{error::Error, event::Event, model::Manifest, yaml::Manifest as UnresolvedManifest};
+use crate::index::Index;
 
 #[derive(Clone)]
 pub struct Input {

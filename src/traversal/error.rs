@@ -1,26 +1,26 @@
 use std::{collections::HashSet, path::PathBuf};
-use crate::manifest::FullIndex;
+use crate::manifest::Index;
 
 #[derive(Debug, PartialEq, thiserror::Error)]
 pub enum Error {
     #[error("failed to expand {field}: {source}")]
     Expansion {
         /// An empty item index identifies a manifest-level field.
-        index: FullIndex,
+        index: Index,
         field: PathField,
         #[source]
         source: shellexpand::path::LookupError<std::env::VarError>,
     },
 
     #[error("non-root item has both path and shed set to absolute paths")]
-    NonRootPathShedBothAbsolute { index: FullIndex },
+    NonRootPathShedBothAbsolute { index: Index },
 
     #[error("overlapping leaves detected")]
-    OverlappingLeaves { indexes: HashSet<FullIndex> },
+    OverlappingLeaves { indexes: HashSet<Index> },
 
     #[error("destination {dst:?} is outside declared root {root:?}")]
     DestinationOutsideRoot {
-        index: FullIndex,
+        index: Index,
         root: PathBuf,
         dst: PathBuf,
     },

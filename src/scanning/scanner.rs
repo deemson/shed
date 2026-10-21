@@ -1,5 +1,5 @@
 use super::{error::*, event::*, model::*};
-use crate::{manifest::FullIndex, traversal};
+use crate::{manifest::Index, traversal};
 use futures::future::join_all;
 use std::path::Path;
 use tokio::sync::mpsc;
@@ -96,7 +96,7 @@ impl Scanner {
 
     pub async fn scan_entries(
         &self,
-        index: &FullIndex,
+        index: &Index,
         parent_node_dst: &Path,
         src: &Path,
         dst: &Path,
@@ -140,7 +140,7 @@ impl Scanner {
 
     pub async fn scan_entry(
         &self,
-        index: &FullIndex,
+        index: &Index,
         parent_node_dst: &Path,
         src: &Path,
         dst: &Path,

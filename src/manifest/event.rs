@@ -1,5 +1,5 @@
 use super::error::Error;
-use super::index::Index;
+use crate::index::Index;
 
 #[derive(Debug)]
 pub enum Event {

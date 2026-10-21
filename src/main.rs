@@ -1,11 +1,5 @@
-mod cli;
-mod execution;
-mod manifest;
-mod reporting;
-mod scanning;
-mod traversal;
-mod util;
-use cli::{Cli, Command, ManifestCommand, PutGetArgs};
+use shed::cli::{Cli, Command, ManifestCommand, PutGetArgs};
+use shed::{manifest, reporting, traversal};
 use std::process::ExitCode;
 use tokio::sync::mpsc;
 

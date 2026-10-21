@@ -1,4 +1,4 @@
-use crate::manifest::FullIndex;
+use crate::manifest::Index;
 use std::path::PathBuf;
 
 #[derive(Debug, PartialEq)]
@@ -8,12 +8,12 @@ pub enum Node {
         nodes: Vec<Node>,
     },
     ReplaceFile {
-        index: FullIndex,
+        index: Index,
         src: PathBuf,
         dst: PathBuf,
     },
     ReplaceDirectory {
-        index: FullIndex,
+        index: Index,
         src: PathBuf,
         dst: PathBuf,
         entries: Vec<Entry>,

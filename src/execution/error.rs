@@ -1,4 +1,4 @@
-use crate::manifest::FullIndex;
+use crate::manifest::Index;
 use std::io;
 
 #[derive(Debug, thiserror::Error)]
@@ -7,7 +7,7 @@ pub enum Error {
     EnsureDirectoryIo {
         #[source]
         source: io::Error,
-        child_indexes: Vec<FullIndex>,
+        child_indexes: Vec<Index>,
     },
     #[error("failed to replace: {source}")]
     ReplaceIo {

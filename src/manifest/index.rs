@@ -1,32 +1,29 @@
-pub type IndexBit = usize;
+use crate::index;
 
-pub type IndexRef<'a> = &'a [IndexBit];
-pub struct FullIndexRef<'a> {
-    pub manifest: IndexRef<'a>,
-    pub item: IndexRef<'a>,
+pub struct IndexRef<'a> {
+    pub manifest: index::Ref<'a>,
+    pub item: index::Ref<'a>,
 }
-
-pub type Index = Vec<IndexBit>;
 
 #[derive(Debug, Eq, Hash, PartialEq, Clone)]
-pub struct FullIndex {
-    pub manifest: Index,
-    pub item: Index,
+pub struct Index {
+    pub manifest: index::Index,
+    pub item: index::Index,
 }
 
-impl FullIndex {
-    pub fn as_ref(&self) -> FullIndexRef<'_> {
-        FullIndexRef {
+impl Index {
+    pub fn as_ref(&self) -> IndexRef<'_> {
+        IndexRef {
             manifest: &self.manifest,
             item: &self.item,
         }
     }
 }
 
-impl<M, I> From<(M, I)> for FullIndex
+impl<M, I> From<(M, I)> for Index
 where
-    M: IntoIterator<Item = IndexBit>,
-    I: IntoIterator<Item = IndexBit>,
+    M: IntoIterator<Item = index::Bit>,
+    I: IntoIterator<Item = index::Bit>,
 {
     fn from((manifest, item): (M, I)) -> Self {
         Self {
@@ -42,8 +39,8 @@ mod tests {
 
     #[test]
     fn creates_full_index_from_iterables() {
-        let actual: FullIndex = ([0, 1], vec![2, 3]).into();
-        let expected = FullIndex {
+        let actual: Index = ([0, 1], vec![2, 3]).into();
+        let expected = Index {
             manifest: vec![0, 1],
             item: vec![2, 3],
         };

@@ -1,4 +1,4 @@
-use super::index::Index;
+use crate::index::Index;
 use std::io;
 
 #[derive(Debug, thiserror::Error)]

@@ -1,22 +1,22 @@
 use super::error::Error;
-use crate::manifest::FullIndex;
+use crate::manifest::Index;
 use std::path::PathBuf;
 
 #[derive(Debug)]
 pub enum Event {
     NodeScanningStarted {
-        index: FullIndex,
+        index: Index,
     },
     NodeScanningFinished {
-        index: FullIndex,
+        index: Index,
         error: Option<Error>,
     },
     EntryScanningStarted {
-        index: FullIndex,
+        index: Index,
         rel: PathBuf,
     },
     EntryScanningFinished {
-        index: FullIndex,
+        index: Index,
         rel: PathBuf,
         error: Option<Error>,
     },

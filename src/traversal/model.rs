@@ -1,5 +1,5 @@
 use super::error::Error;
-use crate::manifest::FullIndex;
+use crate::manifest::Index;
 use std::path::PathBuf;
 
 #[derive(Clone, Debug)]
@@ -31,7 +31,7 @@ pub enum Node {
         nodes: Vec<Node>,
     },
     Leaf {
-        index: FullIndex,
+        index: Index,
         src: PathBuf,
         dst: PathBuf,
     },

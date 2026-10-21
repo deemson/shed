@@ -1,5 +1,5 @@
 use super::error::Error;
-use crate::manifest::FullIndex;
+use crate::manifest::Index;
 use std::path::PathBuf;
 
 #[derive(Debug)]
@@ -12,12 +12,12 @@ pub enum Event {
         error: Option<Error>,
     },
     ReplaceStarted {
-        index: FullIndex,
+        index: Index,
         src: PathBuf,
         dst: PathBuf,
     },
     ReplaceFinished {
-        index: FullIndex,
+        index: Index,
         src: PathBuf,
         dst: PathBuf,
         error: Option<Error>,

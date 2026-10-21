@@ -4,7 +4,8 @@ use super::super::{
 };
 use super::model::{Entry, Plan};
 use crate::{
-    manifest::{FullIndex, Index, Item, ItemKind, Manifest},
+    index,
+    manifest::{Index, Item, ItemKind, Manifest},
     util,
 };
 use path_clean::PathClean;
@@ -25,7 +26,7 @@ impl Planner {
         plan
     }
 
-    fn plan_manifests(&self, plan: &mut Plan, index_parent: Index, manifests: &[Manifest]) {
+    fn plan_manifests(&self, plan: &mut Plan, index_parent: index::Index, manifests: &[Manifest]) {
         for (position, manifest) in manifests.iter().enumerate() {
             let mut index = index_parent.clone();
             index.push(position);
@@ -34,13 +35,13 @@ impl Planner {
         }
     }
 
-    fn plan_manifest(&self, plan: &mut Plan, index: Index, manifest: &Manifest) {
+    fn plan_manifest(&self, plan: &mut Plan, index: index::Index, manifest: &Manifest) {
         let directory = manifest
             .location
             .parent()
             .expect("a resolved manifest location has a parent");
 
-        let full_index = FullIndex {
+        let full_index = Index {
             manifest: index.clone(),
             item: Vec::new(),
         };
@@ -83,7 +84,7 @@ impl Planner {
 
         self.plan_item_kinds(
             plan,
-            FullIndex {
+            Index {
                 manifest: index,
                 item: Vec::new(),
             },
@@ -97,7 +98,7 @@ impl Planner {
     fn plan_item_kinds(
         &self,
         plan: &mut Plan,
-        index_parent: FullIndex,
+        index_parent: Index,
         path_parent: &Path,
         shed_parent: &Path,
         dst_root: Option<&Path>,
@@ -106,7 +107,7 @@ impl Planner {
         for (position, item_kind) in item_kinds.iter().enumerate() {
             let mut item_index = index_parent.item.clone();
             item_index.push(position);
-            let index = FullIndex {
+            let index = Index {
                 manifest: index_parent.manifest.clone(),
                 item: item_index,
             };
@@ -131,7 +132,7 @@ impl Planner {
     fn plan_item(
         &self,
         plan: &mut Plan,
-        index: FullIndex,
+        index: Index,
         path_parent: &Path,
         shed_parent: &Path,
         dst_root: Option<&Path>,
@@ -209,7 +210,7 @@ impl Planner {
     }
 
     fn expand_path(
-        index: &FullIndex,
+        index: &Index,
         field: PathField,
         path: impl AsRef<Path>,
     ) -> Result<PathBuf, Error> {
