@@ -6,3 +6,4 @@ pub mod model_new;
 pub mod model_render;
 pub mod model_resolution;
 pub mod model_traversal;
+pub mod model_scanning;

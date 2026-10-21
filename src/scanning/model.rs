@@ -1,5 +1,5 @@
 use crate::manifest::Index;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, PartialEq)]
 pub enum Node {
@@ -22,12 +22,14 @@ pub enum Node {
 
 #[derive(Debug, PartialEq)]
 pub enum Entry {
-    Directory {
-        dst: PathBuf,
-        entries: Vec<Entry>,
-    },
-    File {
-        src: PathBuf,
-        dst: PathBuf,
-    },
+    Directory { dst: PathBuf, entries: Vec<Entry> },
+    File { src: PathBuf, dst: PathBuf },
+}
+
+impl Entry {
+    pub fn dst(&self) -> &Path {
+        match self {
+            Self::Directory { dst, .. } | Self::File { dst, .. } => dst,
+        }
+    }
 }

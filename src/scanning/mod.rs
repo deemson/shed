@@ -1,5 +1,6 @@
 pub mod error;
 pub mod event;
+pub mod index;
 pub use self::event::*;
 pub mod model;
 pub use self::model::*;

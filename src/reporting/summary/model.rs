@@ -1,5 +1,5 @@
 use crate::traversal;
-use std::path::PathBuf;
+use std::{ffi::OsString, path::PathBuf};
 
 #[derive(Debug)]
 pub struct Report {
@@ -32,4 +32,11 @@ pub struct Item {
     pub shed: Option<String>,
     pub error: Option<String>,
     pub items: Vec<Item>,
+    pub entries: Vec<Entry>,
+}
+
+#[derive(Debug)]
+pub enum Entry {
+    Directory { name: OsString, entries: Vec<Entry> },
+    File { name: OsString },
 }

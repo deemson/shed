@@ -1,5 +1,5 @@
-use super::{error::*, event::*, model::*};
-use crate::{manifest::Index, traversal};
+use super::{error::*, event::*, index::*, model::*};
+use crate::traversal;
 use futures::future::join_all;
 use std::path::Path;
 use tokio::sync::mpsc;
@@ -63,7 +63,18 @@ impl Scanner {
                     return node;
                 }
                 if metadata.is_dir() {
-                    let entries = match self.scan_entries(&index, &dst, &src, &dst).await {
+                    let entries = match self
+                        .scan_entries(
+                            IndexRef {
+                                manifest: &index.manifest,
+                                item: &index.item,
+                                entry: &[],
+                            },
+                            &src,
+                            &dst,
+                        )
+                        .await
+                    {
                         Ok(entries) => entries,
                         Err(error) => {
                             self.send_event(Event::NodeScanningFinished {
@@ -96,8 +107,7 @@ impl Scanner {
 
     pub async fn scan_entries(
         &self,
-        index: &Index,
-        parent_node_dst: &Path,
+        index: IndexRef<'_>,
         src: &Path,
         dst: &Path,
     ) -> Result<Vec<Entry>, Error> {
@@ -125,33 +135,34 @@ impl Scanner {
         }
         child_srcs.sort();
 
-        let entries = join_all(child_srcs.iter().map(|child_src| async {
-            let filename = child_src
-                .file_name()
-                .expect("a directory entry has a filename");
-            let child_dst = dst.join(filename);
-            self.scan_entry(index, parent_node_dst, child_src, &child_dst)
+        let entries = join_all(child_srcs.iter().enumerate().map(|(position, child_src)| {
+            let mut entry_index = index.entry.to_vec();
+            entry_index.push(position);
+            async {
+                let filename = child_src
+                    .file_name()
+                    .expect("a directory entry has a filename");
+                let child_dst = dst.join(filename);
+                self.scan_entry(
+                    Index {
+                        manifest: index.manifest.to_vec(),
+                        item: index.item.to_vec(),
+                        entry: entry_index,
+                    },
+                    child_src,
+                    &child_dst,
+                )
                 .await
+            }
         }))
         .await;
 
         Ok(entries.into_iter().flatten().collect())
     }
 
-    pub async fn scan_entry(
-        &self,
-        index: &Index,
-        parent_node_dst: &Path,
-        src: &Path,
-        dst: &Path,
-    ) -> Option<Entry> {
-        let rel = dst
-            .strip_prefix(parent_node_dst)
-            .expect("must be node's child")
-            .to_path_buf();
+    pub async fn scan_entry(&self, index: Index, src: &Path, dst: &Path) -> Option<Entry> {
         self.send_event(Event::EntryScanningStarted {
             index: index.to_owned(),
-            rel: rel.clone(),
         })
         .await;
         let metadata = match tokio::fs::symlink_metadata(src).await {
@@ -159,7 +170,6 @@ impl Scanner {
             Err(source) => {
                 self.send_event(Event::EntryScanningFinished {
                     index: index.clone(),
-                    rel,
                     error: Some(Error::MetadataIo {
                         path: src.to_path_buf(),
                         source,
@@ -170,12 +180,11 @@ impl Scanner {
             }
         };
         if metadata.is_dir() {
-            let entries = match self.scan_entries(index, parent_node_dst, src, dst).await {
+            let entries = match self.scan_entries(index.as_ref(), src, dst).await {
                 Ok(entries) => entries,
                 Err(error) => {
                     self.send_event(Event::EntryScanningFinished {
                         index: index.clone(),
-                        rel,
                         error: Some(error),
                     })
                     .await;
@@ -188,7 +197,6 @@ impl Scanner {
             });
             self.send_event(Event::EntryScanningFinished {
                 index: index.to_owned(),
-                rel,
                 error: None,
             })
             .await;
@@ -201,7 +209,6 @@ impl Scanner {
             });
             self.send_event(Event::EntryScanningFinished {
                 index: index.to_owned(),
-                rel,
                 error: None,
             })
             .await;
@@ -209,7 +216,6 @@ impl Scanner {
         }
         self.send_event(Event::EntryScanningFinished {
             index: index.clone(),
-            rel,
             error: Some(Error::UnsupportedFileType {
                 path: src.to_path_buf(),
             }),

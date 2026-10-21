@@ -1,5 +1,5 @@
 use super::model::*;
-use crate::manifest;
+use crate::{manifest, scanning};
 
 impl From<manifest::Manifest> for Manifest {
     fn from(manifest: manifest::Manifest) -> Self {
@@ -24,13 +24,32 @@ impl From<manifest::ItemKind> for Item {
                 shed: None,
                 error: None,
                 items: Vec::new(),
+                entries: Vec::new(),
             },
             manifest::ItemKind::Item(item) => Self {
                 path: item.path,
                 shed: item.shed,
                 error: None,
                 items: item.items.into_iter().flatten().map(Self::from).collect(),
+                entries: Vec::new(),
             },
+        }
+    }
+}
+
+impl From<scanning::Entry> for Entry {
+    fn from(entry: scanning::Entry) -> Self {
+        let name = entry
+            .dst()
+            .file_name()
+            .expect("scanned entry has a file name")
+            .to_os_string();
+        match entry {
+            scanning::Entry::Directory { entries, .. } => Self::Directory {
+                name,
+                entries: entries.into_iter().map(Self::from).collect(),
+            },
+            scanning::Entry::File { .. } => Self::File { name },
         }
     }
 }
