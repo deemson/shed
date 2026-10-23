@@ -56,8 +56,8 @@ impl Manifest {
             Some(traversal::Direction::Get) => "→",
         };
         Some(match &self.shed {
-            Some(shed) => format!("{shed} {direction} {path}").dimmed().to_string(),
-            None => path.dimmed().to_string(),
+            Some(shed) => format!("{shed} {direction} {path}").normal().cyan().to_string(),
+            None => path.normal().cyan().to_string(),
         })
     }
 }
@@ -76,10 +76,16 @@ impl Item {
             lines.push(error.red().to_string());
         }
 
+        let entries = match self.entries {
+            Some(entries) if context.verbose => entries,
+            _ => Vec::new(),
+        };
+
         lines.extend(tree_prefix_groups_of_lines(
             self.items
                 .into_iter()
                 .map(|item| item.lines(context))
+                .chain(entries.into_iter().map(|entry| entry.lines()))
                 .collect(),
         ));
 
@@ -98,6 +104,29 @@ impl Item {
             Some(shed) => format!("{shed}{slash} {direction} {path}{slash}").to_string(),
             None => format!("{path}{slash}"),
         }
+    }
+}
+
+impl Entry {
+    fn lines(self) -> Vec<String> {
+        let mut lines = Vec::new();
+
+        let slash = if self.entries.is_some() { "/" } else { "" };
+        lines.push(format!("{}{slash}", self.name.to_string_lossy().dimmed()));
+
+        if let Some(error) = self.error {
+            lines.push(error.red().to_string());
+        }
+
+        lines.extend(tree_prefix_groups_of_lines(
+            self.entries
+                .into_iter()
+                .flatten()
+                .map(|entry| entry.lines())
+                .collect(),
+        ));
+
+        lines
     }
 }
 
