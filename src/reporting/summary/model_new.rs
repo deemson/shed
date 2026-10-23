@@ -5,6 +5,7 @@ impl Report {
     pub fn new(manifests: impl IntoIterator<Item = manifest::Manifest>) -> Self {
         Self {
             direction: None,
+            status: ReportStatus::Initial,
             manifests: manifests.into_iter().map(Manifest::from).collect(),
         }
     }

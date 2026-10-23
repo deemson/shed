@@ -1,7 +1,9 @@
 pub mod error;
+pub use self::error::*;
 pub mod event;
-pub mod index;
 pub use self::event::*;
+pub mod index;
+pub use self::index::*;
 pub mod model;
 pub use self::model::*;
 pub mod scanner;

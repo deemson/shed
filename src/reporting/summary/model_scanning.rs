@@ -1,3 +1,5 @@
+use core::error;
+
 use super::model::*;
 use crate::scanning;
 
@@ -23,17 +25,53 @@ impl Report {
             scanning::Node::ReplaceFile { .. } => (),
             scanning::Node::ReplaceDirectory { index, entries, .. } => {
                 let item = self.get_item_mut(index.as_ref());
-                item.entries = entries.into_iter().map(Entry::from).collect();
+                item.entries = Some(entries.into_iter().map(Entry::from).collect());
             }
         }
     }
     fn scanning_event(&mut self, event: scanning::Event) {
         match event {
-            scanning::Event::NodeScanningStarted { index } => (),
-            scanning::Event::NodeScanningFinished { index, error } => (),
-            scanning::Event::EntryScanningStarted { index } => (),
-            scanning::Event::EntryScanningFinished { index, error } => (),
+            scanning::Event::NodeScanningStarted { index } => {
+                let item = self.get_item_mut(index.as_ref());
+                item.scanning_started();
+            }
+            scanning::Event::NodeScanningFinished { index, error } => {
+                let item = self.get_item_mut(index.as_ref());
+                item.scanning_finished(error);
+            }
+            scanning::Event::EntryScanningStarted { index } => {
+                let entry = self.get_entry_mut(index.as_ref());
+                entry.scanning_started();
+            }
+            scanning::Event::EntryScanningFinished { index, error } => {
+                let entry = self.get_entry_mut(index.as_ref());
+                entry.scanning_finished(error);
+            }
             scanning::Event::Done => (),
         }
+    }
+}
+
+impl Item {
+    fn scanning_started(&mut self) {
+        assert_eq!(self.status, ItemStatus::Traversed);
+        self.status = ItemStatus::Scanning;
+    }
+    fn scanning_finished(&mut self, error: Option<scanning::Error>) {
+        assert_eq!(self.status, ItemStatus::Scanning);
+        self.error = error.map(|error| error.to_string());
+        self.status = ItemStatus::Scanned;
+    }
+}
+
+impl Entry {
+    fn scanning_started(&mut self) {
+        assert_eq!(self.status, EntryStatus::Initial);
+        self.status = EntryStatus::Scanning;
+    }
+    fn scanning_finished(&mut self, error: Option<scanning::Error>) {
+        assert_eq!(self.status, EntryStatus::Scanning);
+        self.error = error.map(|error| error.to_string());
+        self.status = EntryStatus::Scanned;
     }
 }

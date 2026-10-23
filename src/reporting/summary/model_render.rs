@@ -4,12 +4,16 @@ use colored::Colorize;
 
 struct Context {
     direction: Option<traversal::Direction>,
+    status: ReportStatus,
+    verbose: bool,
 }
 
 impl Report {
-    pub fn render(self) -> String {
+    pub fn render(self, verbose: bool) -> String {
         let context = Context {
             direction: self.direction,
+            status: self.status,
+            verbose,
         };
         self.manifests
             .into_iter()
@@ -59,6 +63,10 @@ impl Manifest {
 }
 
 impl Item {
+    fn is_dir(&self) -> bool {
+        !self.items.is_empty() || self.entries.is_some()
+    }
+
     fn lines(self, context: &Context) -> Vec<String> {
         let mut lines = Vec::new();
 
@@ -85,9 +93,10 @@ impl Item {
             Some(traversal::Direction::Put) => "←",
             Some(traversal::Direction::Get) => "→",
         };
+        let slash = if self.is_dir() { "/" } else { "" };
         match &self.shed {
-            Some(shed) => format!("{shed} {direction} {path}").to_string(),
-            None => path.to_string(),
+            Some(shed) => format!("{shed}{slash} {direction} {path}{slash}").to_string(),
+            None => format!("{path}{slash}"),
         }
     }
 }

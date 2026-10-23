@@ -1,5 +1,5 @@
 use shed::cli::{Cli, Command, ManifestCommand, PutGetArgs};
-use shed::{manifest, reporting, traversal};
+use shed::{manifest, reporting, scanning, traversal};
 use std::process::ExitCode;
 use tokio::sync::mpsc;
 
@@ -50,28 +50,34 @@ async fn run(args: &PutGetArgs, direction: traversal::Direction) {
     let (manifests, manifest_events) =
         tokio::join!(resolver.resolve(resolve_inputs), consume_resolve_events);
 
-
     let plan = traversal::plan(direction.clone(), &manifests);
-    
-    let mut report = reporting::summary::Report::new(manifests);
-    report.resolution(manifest_events);
-    report.traversal(direction, plan);
-
-    println!("{}", report.render());
 
     // dbg!(&plan);
 
-    // let (scan_sender, mut scan_receiver) = mpsc::channel(32);
-    // let scanner = scanning::Scanner::new(scan_sender);
-    // let consume_scan_events = async {
-    //     while let Some(event) = scan_receiver.recv().await {
-    //         if matches!(event, scanning::Event::Done) {
-    //             break;
-    //         }
-    //     }
-    // };
-    // let (scan, ()) = tokio::join!(scanner.scan(plan.roots), consume_scan_events);
+    let (scan_sender, mut scan_receiver) = mpsc::channel(32);
+    let scanner = scanning::Scanner::new(scan_sender);
+    let consume_scan_events = async {
+        let mut events = Vec::new();
+        while let Some(event) = scan_receiver.recv().await {
+            let done = matches!(event, scanning::Event::Done);
+            events.push(event);
 
+            if done {
+                break;
+            }
+        }
+        events
+    };
+
+    let mut report = reporting::summary::Report::new(manifests);
+    report.resolution(manifest_events);
+    report.traversal(direction, &plan);
+
+    let (scan, scan_events) = tokio::join!(scanner.scan(plan.roots), consume_scan_events);
+
+    report.scanning(scan, scan_events);
+
+    println!("{}", report.render(true));
     // dbg!(&scan);
 
     // let (execute_sender, mut execute_receiver) = mpsc::channel(32);

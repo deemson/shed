@@ -3,6 +3,8 @@ use crate::manifest;
 
 impl Report {
     pub fn resolution(&mut self, events: impl IntoIterator<Item = manifest::Event>) {
+        assert_eq!(self.status, ReportStatus::Initial);
+        self.status = ReportStatus::Resolving;
         for event in events {
             self.resolution_event(event);
         }
@@ -17,7 +19,10 @@ impl Report {
                 let manifest = self.get_manifest_mut(&index);
                 manifest.resolution_finished(error);
             }
-            manifest::Event::Done => (),
+            manifest::Event::Done => {
+                assert_eq!(self.status, ReportStatus::Resolving);
+                self.status = ReportStatus::Resolved
+            }
         }
     }
 }

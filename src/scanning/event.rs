@@ -1,6 +1,5 @@
 use super::{error::Error, index::Index};
 use crate::manifest;
-use std::path::PathBuf;
 
 #[derive(Debug)]
 pub enum Event {
