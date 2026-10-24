@@ -57,7 +57,8 @@ impl Planner {
                 plan.errors.push(error);
                 return;
             }
-        }.clean();
+        }
+        .clean();
 
         let shed = match manifest
             .shed
@@ -71,7 +72,8 @@ impl Planner {
                 plan.errors.push(error);
                 return;
             }
-        }.clean();
+        }
+        .clean();
 
         self.plan_manifests(plan, index.clone(), &manifest.manifests);
 

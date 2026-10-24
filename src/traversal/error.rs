@@ -1,5 +1,5 @@
-use std::{collections::HashSet, path::PathBuf};
 use crate::manifest::Index;
+use std::{collections::HashSet, path::PathBuf};
 
 #[derive(Debug, PartialEq, thiserror::Error)]
 pub enum Error {

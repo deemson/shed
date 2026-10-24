@@ -54,7 +54,10 @@ impl Manifest {
             Some(traversal::Direction::Get) => "→",
         };
         Some(match &self.shed {
-            Some(shed) => format!("{shed} {direction} {path}").normal().cyan().to_string(),
+            Some(shed) => format!("{shed} {direction} {path}")
+                .normal()
+                .cyan()
+                .to_string(),
             None => path.normal().cyan().to_string(),
         })
     }

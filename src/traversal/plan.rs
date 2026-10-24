@@ -790,7 +790,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn omits_leaves_escaping_the_manifest_destination_root_and_plans_valid_siblings_for_get() {
+    async fn omits_leaves_escaping_the_manifest_destination_root_and_plans_valid_siblings_for_get()
+    {
         let temp_dir = TempDir::new().unwrap();
         let shed_dir = temp_dir.path().join("shed");
 
