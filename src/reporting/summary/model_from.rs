@@ -39,8 +39,8 @@ impl From<manifest::ItemKind> for Item {
     }
 }
 
-impl From<scanning::Entry> for Entry {
-    fn from(entry: scanning::Entry) -> Self {
+impl From<&scanning::Entry> for Entry {
+    fn from(entry: &scanning::Entry) -> Self {
         let name = entry
             .dst()
             .file_name()
@@ -48,7 +48,7 @@ impl From<scanning::Entry> for Entry {
             .to_os_string();
         let entries = match entry {
             scanning::Entry::Directory { entries, .. } => {
-                Some(entries.into_iter().map(Self::from).collect())
+                Some(entries.iter().map(Self::from).collect())
             }
             _ => None,
         };

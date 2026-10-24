@@ -4,28 +4,28 @@ use crate::scanning;
 impl Report {
     pub fn scanning(
         &mut self,
-        nodes: impl IntoIterator<Item = scanning::Node>,
+        nodes: &[scanning::Node],
         events: impl IntoIterator<Item = scanning::Event>,
     ) {
-        assert_eq!(self.status, ReportStatus::Resolved);
+        assert_eq!(self.status, ReportStatus::Traversed);
         self.status = ReportStatus::Scanning;
         self.scanning_nodes(nodes);
         for event in events {
             self.scanning_event(event);
         }
     }
-    fn scanning_nodes(&mut self, nodes: impl IntoIterator<Item = scanning::Node>) {
+    fn scanning_nodes(&mut self, nodes: &[scanning::Node]) {
         for node in nodes {
             self.scanning_node(node);
         }
     }
-    fn scanning_node(&mut self, node: scanning::Node) {
+    fn scanning_node(&mut self, node: &scanning::Node) {
         match node {
             scanning::Node::EnsureDirectory { nodes, .. } => self.scanning_nodes(nodes),
             scanning::Node::ReplaceFile { .. } => (),
             scanning::Node::ReplaceDirectory { index, entries, .. } => {
                 let item = self.get_item_mut(index.as_ref());
-                item.entries = Some(entries.into_iter().map(Entry::from).collect());
+                item.entries = Some(entries.iter().map(Entry::from).collect());
             }
         }
     }

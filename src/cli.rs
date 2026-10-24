@@ -24,17 +24,16 @@ pub enum Command {
 
 #[derive(Args)]
 pub struct PutGetArgs {
+    /// Show what would change without touching any files
     #[arg(long)]
     pub dry: bool,
 
+    /// Print every entry in the report, not just the summary
+    #[arg(short, long)]
+    pub verbose: bool,
+
     #[arg(required = true, value_name = "MANIFEST")]
     pub manifests: Vec<PathBuf>,
-}
-
-pub enum StopAt {
-    Resolution,
-    Traversal,
-    Scanning,
 }
 
 #[derive(Subcommand)]

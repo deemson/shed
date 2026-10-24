@@ -74,12 +74,10 @@ async fn run(args: &PutGetArgs, direction: traversal::Direction) {
 
     let (scan, scan_events) = tokio::join!(scanner.scan(plan.roots), consume_scan_events);
 
-    report.scanning(scan, scan_events);
-
-    println!("{}", report.render(true));
+    report.scanning(&scan, scan_events);
 
     let (execute_sender, mut execute_receiver) = mpsc::channel(32);
-    let executor = execution::Executor::new(true, execute_sender);
+    let executor = execution::Executor::new(args.dry, execute_sender);
 
     let consume_execute_events = async {
         let mut events = Vec::new();
@@ -98,5 +96,7 @@ async fn run(args: &PutGetArgs, direction: traversal::Direction) {
 
     let ((), execute_events) = tokio::join!(executor.execute(&scan), consume_execute_events);
 
-    dbg!(execute_events);
+    report.execution(execute_events);
+
+    println!("{}", report.render(args.verbose));
 }
