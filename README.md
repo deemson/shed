@@ -24,10 +24,10 @@ Homebrew is the supported binary installation route on macOS. The raw macOS arch
 Official tags expose a flake package for x86_64 and aarch64 Linux. Release outputs are served by the public `deemson-shed` Cachix cache, with a local source build as the automatic fallback:
 
 ```sh
-nix profile install github:deemson/shed/v0.2.0 --accept-flake-config
+nix profile install github:deemson/shed/v0.3.0 --accept-flake-config
 ```
 
-`--accept-flake-config` explicitly accepts the public cache URL and signing key declared by the flake. Replace `v0.2.0` with the release you want; pinning the tag keeps installations reproducible.
+`--accept-flake-config` explicitly accepts the public cache URL and signing key declared by the flake. Replace `v0.3.0` with the release you want; pinning the tag keeps installations reproducible.
 
 Static musl archives that run directly on NixOS are also available from each [GitHub release](https://github.com/deemson/shed/releases):
 
@@ -41,7 +41,7 @@ Verify the adjacent `.sha256` file before extracting an archive and placing `she
 Building from source requires Rust 1.97.1 and Cargo:
 
 ```sh
-cargo install --git https://github.com/deemson/shed.git --tag v0.2.0 --locked
+cargo install --git https://github.com/deemson/shed.git --tag v0.3.0 --locked
 ```
 
 To install from a local checkout instead:
@@ -75,7 +75,7 @@ Preview the copy first:
 shed put --dry workstation.yaml
 ```
 
-> **Warning:** Shed overwrites existing destination files. It does not delete stale files or detect and resolve content conflicts. Review a dry run before copying in either direction, especially before using `get` against live dotfiles.
+> **Warning:** Shed replaces destinations. A file copy overwrites the destination file. A directory copy deletes the destination directory first, so files that exist only at the destination are lost. Review a dry run before you copy in either direction, especially before you run `get` against live dotfiles.
 
 Copy the file into the shed:
 
@@ -94,81 +94,87 @@ A typical multi-system workflow is: `put`, commit and push with your version-con
 
 ## Manifests
 
-Shed 0.2 uses one recursive YAML manifest format. A manifest can include other manifests, declare items, contain both sections, or be intentionally empty:
+A manifest is a YAML file with four optional fields:
 
 ```yaml
+path: $HOME/.config
+shed: config
 include:
   - shared/shell
 items:
-  - path: $HOME/.config/editor
-    shed: config/editor
-    items:
-      - init.lua
-      - plugins
-      - path: local-settings.json
-        shed: settings.json
+  - nvim
+  - path: git/config
+    shed: gitconfig
 ```
 
-Unknown fields are errors. `include` and `items` are always lists, even when they contain one entry.
+- `path` is the system directory for the items of the manifest.
+- `shed` is the shed directory for the items of the manifest. A relative value starts at the directory of the manifest. The default is the directory of the manifest.
+- `include` lists other manifests.
+- `items` lists the files and directories to copy.
+
+The example copies `$HOME/.config/nvim` to `config/nvim` and `$HOME/.config/git/config` to `config/gitconfig`.
+
+Unknown fields are errors. An empty manifest (`{}`) is valid.
+
+### Items
+
+An item is a string or an object with `path`, `shed`, and `items` fields. A string is a short form for an object with only `path`.
+
+```yaml
+items:
+  - path: $HOME/.config/editor
+    shed: editor
+    items:
+      - init.lua
+      - path: local-settings.json
+        shed: settings.json
+      - path: lua
+        items:
+          - plugins.lua
+```
+
+A relative `path` starts at the path of the parent item. For a top-level item, the parent path is the `path` of the manifest. An absolute `path` replaces the parent path.
+
+A relative `shed` starts at the shed path of the parent item in the same way. An item without `shed` uses its `path` as its shed path. The example above copies these files:
+
+| system | shed |
+|---|---|
+| `$HOME/.config/editor/init.lua` | `editor/init.lua` |
+| `$HOME/.config/editor/local-settings.json` | `editor/settings.json` |
+| `$HOME/.config/editor/lua/plugins.lua` | `editor/lua/plugins.lua` |
+
+An item with `items` is a parent. Shed copies only the leaves, the items without `items`. A leaf can be a file or a directory. A parent with an empty `items` list copies no files.
+
+A top-level item with a relative `path` in a manifest without `path` starts at the current directory. Give such an item an absolute path, or give the manifest a `path`.
+
+### Path rules
+
+Shed expands a leading `~`, `$VAR`, and `${VAR}` in every `path` and `shed` value, at every level. An undefined variable is an error. Shed does not expand include names.
+
+Shed removes `.` and `..` components lexically. Shed does not resolve symlinks when it compares paths.
+
+The planner reports these errors:
+
+- An item has an absolute `path` and no `shed`. The item does not show where its files belong in the shed.
+- A nested item has an absolute `path` and an absolute `shed`.
+- A leaf destination is outside its destination root. The destination root is the destination side of the manifest when the manifest sets `path` or `shed`. Otherwise, the destination root is the destination side of the top-level parent item.
+- Two leaves have the same destination, or one destination is inside the other. Shed reports all of the affected leaves as one overlap group.
+
+The destination side is the shed for `put` and the system for `get`. Shed compares only destinations, so one source can go to two destinations.
 
 ### Includes
 
-Each `include` entry names another manifest. A relative include is resolved from the directory containing the manifest that declares it. An extensionless include gains `.yaml`; an include with an extension is used verbatim. Absolute include paths are also allowed.
+Each `include` entry names another manifest without its extension. Shed looks for `<name>.yaml`, then for `<name>.yml`. A relative name starts at the directory of the manifest that declares the include. An absolute name is also allowed.
 
-Includes are processed depth-first in listed order before local items. A manifest reached more than once is processed at its first occurrence only. Include cycles are errors.
+Write include names without the extension. Shed always adds one, so `common.yaml` refers to `common.yaml.yaml`.
 
-You can also pass several root manifests. Shed composes them in command-line order and performs one validation, plan, and sync operation:
+Include cycles are errors. Shed resolves a manifest once for each include of it. If two manifests include the same manifest, its leaves appear twice and cause an overlap error.
+
+You can also pass several root manifests. Shed plans and copies them together:
 
 ```sh
 shed put machine.yaml private.yaml
 ```
-
-### Items
-
-Every top-level item is an object with two required fields:
-
-- `path`: an absolute live-system path. A complete leading `$HOME` is expanded.
-- `shed`: an absolute path or a path relative to the declaring manifest's directory.
-
-An item with no `items` field is a sync endpoint. An item with a nonempty child `items` list is a path prefix; only its leaves are synced. An explicit empty child list is invalid.
-
-Children can be objects or strings. Child paths must be relative and cannot contain `..`. A child string uses the same suffix on both sides:
-
-```yaml
-- path: $HOME/.config/editor
-  shed: config/editor
-  items:
-    - init.lua
-```
-
-This resolves to `$HOME/.config/editor/init.lua` and `config/editor/init.lua` relative to the manifest.
-
-A child object can rename or relocate the shed side. If `shed` is omitted, it defaults to the child's `path`:
-
-```yaml
-- path: $HOME/.config/editor
-  shed: config/editor
-  items:
-    - path: local-settings.json
-      shed: settings.json
-    - path: lua
-      items:
-        - init.lua
-```
-
-Top-level strings are not allowed because they cannot identify both endpoint roots unambiguously.
-
-### Path validation
-
-Shed resolves and validates all manifests before writing anything.
-
-- `$HOME` expansion is supported only at the beginning of top-level `path` and `shed` values. Shed does not expand `~`, other variables, shell expressions, include paths, or child paths.
-- A used `HOME` value must be nonempty and absolute.
-- Top-level paths are normalized lexically. Relative shed roots may use `..`; child paths may not escape their parents.
-- A mapping from a path onto itself is rejected.
-- Exact duplicate endpoint pairs are copied once. Other equal or parent/descendant overlaps on either side are rejected because they could overwrite each other in `put` or `get`.
-
-Conflict checks do not follow symlinks, so differently written paths that alias through a symlink are not detected as overlaps.
 
 ## Commands
 
@@ -177,13 +183,12 @@ Conflict checks do not follow symlinks, so differently written paths that alias 
 - `shed put [OPTIONS] <MANIFEST>...` copies system paths into the shed.
 - `shed get [OPTIONS] <MANIFEST>...` copies shed paths back to the system.
 
-Each command requires at least one exact manifest file path. Relative command-line paths are resolved from the current directory. Unlike includes, root paths do not gain an implicit `.yaml` extension.
+Each command needs at least one exact manifest file path. A relative path starts at the current directory. Root manifest paths do not get an implicit extension.
 
-Sync options appear after `put` or `get`:
+Sync options come after `put` or `get`:
 
-- `--dry` prints planned copies without creating directories or writing files.
-- `-v, --verbose` prints each copy operation.
-- `--no-progress` disables the interactive progress display.
+- `--dry` runs every check but creates no directories and writes no files.
+- `-v, --verbose` adds the files and directories inside each directory item to the report.
 - `-h, --help` prints command help.
 
 Top-level `-V, --version` prints the release version. Development builds also include the commits since the latest tag, the Git commit, and a `dirty` suffix when the working tree has changes.
@@ -194,26 +199,53 @@ Top-level `-V, --version` prints the release version. Development builds also in
 shed manifest schema > manifest.schema.json
 ```
 
-The generated JSON Schema describes the strict root and child YAML shapes. Filesystem-dependent rules such as endpoint absoluteness, expansion, containment, includes, and cross-item conflicts are also checked by Shed at runtime.
+The generated JSON Schema describes the YAML shape of a manifest. Shed checks the path rules, includes, and overlaps at runtime.
 
 ### Exit codes
 
-- `0`: completed without warnings or errors.
-- `1`: completed with one or more warnings, such as a missing source.
-- `2`: manifest, setup, validation, or copy error.
-- `130`: cancelled with Ctrl-C.
+- `0`: every phase completed without errors.
+- `1`: a phase reported one or more errors.
 
-## Progress and sync behavior
+## How a run works
 
-The interactive progress display preserves the authored item hierarchy. Branch rows aggregate descendant items and files; a leaf that points to a directory aggregates files discovered recursively. Included manifests are shown as headings. Exact duplicate leaves remain visible but are marked as duplicates and do not add work twice.
+A run has four phases:
 
-Dry and verbose runs use plain output with indented leaf headings and copy operations. A successful non-verbose run with redirected output remains quiet.
+1. **Resolve** reads the root manifests and their includes.
+2. **Plan** expands paths, checks the path rules, and builds the list of copies.
+3. **Scan** reads the metadata of each source and lists the contents of each source directory.
+4. **Copy** creates the destination directories and copies the files.
 
-Shed creates destination directories and recursively scans directory sources. Existing destination files are replaced; files present only at the destination are left in place.
+Shed stops after the first phase that reports an error. Shed then prints the report and exits with code `1`. So Shed changes no files unless resolve, plan, and scan all succeed. An error in the copy phase does not stop the copies of other items.
 
-Missing sources produce warnings and are skipped. The first Ctrl-C requests graceful cancellation. A second Ctrl-C exits immediately.
+At the end of a run, Shed prints a report as a tree of manifests and items. An arrow shows the direction: `←` for `put` and `→` for `get`. Each error appears in red below its item. A `--dry` run prints the same report as a real run.
 
-Shed does not preserve symlink objects: file symlinks are copied as regular file contents. Symlinked directories encountered inside a copied directory tree are created at the destination but are not traversed.
+Copy rules:
+
+- For a file source, Shed replaces the destination file. A destination that exists and is not a regular file is an error.
+- For a directory source, Shed deletes the destination directory and copies the source tree into a new one.
+- Shed creates the parent directories of each destination.
+- A source that does not exist is an error.
+- A symlink in a source is an error, at the top level and inside a directory.
+
+Shed does not handle Ctrl-C. An interrupt stops the process immediately and can leave a copy incomplete.
+
+## Migrating from 0.2
+
+The manifest format and the copy rules changed after 0.2.
+
+- A manifest can set `path` and `shed` for all of its items.
+- Top-level items can be strings.
+- Shed expands `~` and every environment variable in every `path` and `shed` value. Version 0.2 expanded only a leading `$HOME` in top-level values.
+- Child paths can be absolute and can contain `..`, inside the destination root.
+- An item with an absolute `path` now needs a `shed`.
+- Shed always adds an extension to include names and also tries `.yml`. Remove the extension from include names that contain one.
+- A manifest that two manifests include now causes an overlap error. Version 0.2 processed it once.
+- An empty `items` list is no longer an error.
+- A directory copy now deletes files that exist only at the destination. Version 0.2 left them in place.
+- A source that does not exist is now an error that stops the run. Version 0.2 skipped it with a warning.
+- A symlink in a source is now an error. Version 0.2 copied the content of a file symlink.
+- `--no-progress` and the progress display are gone. Shed prints one report at the end of the run. `-v` now adds directory contents to the report.
+- Every error exits with code `1`. Codes `2` and `130` are gone.
 
 ## Migrating from 0.1
 

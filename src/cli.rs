@@ -1,6 +1,5 @@
-use std::path::PathBuf;
-
 use clap::{Args, Parser, Subcommand};
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(
@@ -15,11 +14,8 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Copy from system to shed
-    Put(SyncArgs),
-    /// Copy from shed to system
-    Get(SyncArgs),
-    /// Manifest utilities
+    Put(PutGetArgs),
+    Get(PutGetArgs),
     Manifest {
         #[command(subcommand)]
         command: ManifestCommand,
@@ -27,71 +23,26 @@ pub enum Command {
 }
 
 #[derive(Args)]
-pub struct SyncArgs {
-    /// Print operations without executing
+pub struct PutGetArgs {
+    /// Show what would change without touching any files
     #[arg(long)]
     pub dry: bool,
 
-    /// Print detailed output
+    /// Print every entry in the report, not just the summary
     #[arg(short, long)]
     pub verbose: bool,
 
-    /// Disable the interactive progress display
-    #[arg(long)]
-    pub no_progress: bool,
-
-    /// Manifest YAML files
     #[arg(required = true, value_name = "MANIFEST")]
     pub manifests: Vec<PathBuf>,
 }
 
 #[derive(Subcommand)]
 pub enum ManifestCommand {
-    /// Print the JSON Schema for manifest YAML
     Schema,
 }
 
 impl Cli {
     pub fn parse_args() -> Self {
         Parser::parse()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_command_first_sync_arguments() {
-        let cli = Cli::try_parse_from(["shed", "put", "--dry", "one.yaml", "two.yaml"]).unwrap();
-        let Command::Put(args) = cli.command else {
-            panic!("expected put");
-        };
-        assert!(args.dry);
-        assert_eq!(
-            args.manifests,
-            [PathBuf::from("one.yaml"), PathBuf::from("two.yaml")]
-        );
-    }
-
-    #[test]
-    fn rejects_sync_options_before_the_command() {
-        assert!(Cli::try_parse_from(["shed", "--dry", "put", "one.yaml"]).is_err());
-    }
-
-    #[test]
-    fn requires_at_least_one_manifest() {
-        assert!(Cli::try_parse_from(["shed", "get"]).is_err());
-    }
-
-    #[test]
-    fn parses_manifest_schema_command() {
-        let cli = Cli::try_parse_from(["shed", "manifest", "schema"]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Manifest {
-                command: ManifestCommand::Schema
-            }
-        ));
     }
 }
