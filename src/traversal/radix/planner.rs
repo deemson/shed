@@ -161,6 +161,11 @@ impl Planner {
         let path_is_absolute = item_path.is_absolute();
         let shed_is_absolute = item_shed.as_deref().is_some_and(Path::is_absolute);
 
+        if path_is_absolute && item_shed.is_none() {
+            plan.errors.push(Error::AbsolutePathWithoutShed { index });
+            return;
+        }
+
         if index.item.len() > 1 && path_is_absolute && shed_is_absolute {
             plan.errors
                 .push(Error::NonRootPathShedBothAbsolute { index });
@@ -170,7 +175,6 @@ impl Planner {
         let path = path_parent.join(item_path).clean();
         let shed = match item_shed {
             Some(shed) => shed_parent.join(shed),
-            None if Path::new(&item.path).is_absolute() => shed_parent.to_path_buf(),
             None => shed_parent.join(&item.path),
         }
         .clean();

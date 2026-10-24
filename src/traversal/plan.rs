@@ -357,6 +357,7 @@ mod tests {
             formatdoc! {"
               items:
                 - path: {path_dir_display}
+                  shed: .
                   items:
                     - path: dir1
                       items:
@@ -702,6 +703,7 @@ mod tests {
             formatdoc! {"
               items:
                 - path: {path_dir_display}
+                  shed: .
                   items:
                     - valid-leaf
                     - path: {path_dir_display}/invalid-leaf
@@ -833,6 +835,56 @@ mod tests {
                 root: dst_root,
                 dst: home.join(".config/escaping-leaf"),
             }],
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
+    async fn omits_items_with_absolute_path_and_no_shed_and_plans_unrelated_items_for_put() {
+        let temp_dir = TempDir::new().unwrap();
+        let path_dir = temp_dir.path().join("path");
+        let shed_dir = temp_dir.path().join("shed");
+
+        let path_dir_display = path_dir.display();
+        let manifest_path = testing_m::write_yaml_manifest(
+            &shed_dir,
+            "manifest",
+            formatdoc! {"
+              items:
+                - {path_dir_display}/invalid-leaf
+                - path: {path_dir_display}/invalid-parent
+                  items:
+                    - child
+                - path: {path_dir_display}/valid-leaf
+                  shed: valid-leaf
+            "},
+        );
+        let manifest_directory = manifest_path.parent().unwrap().to_path_buf();
+
+        let (manifests, resolve_events) = testing_m::resolve(vec![Input {
+            name: "manifest".into(),
+            path: manifest_path,
+        }])
+        .await;
+
+        testing_m::assert_events_contain_no_errors(&resolve_events);
+        testing_m::assert_events_contain_done_last(&resolve_events);
+
+        let actual = plan(Direction::Put, &manifests);
+        let expected = Plan {
+            roots: vec![Node::Leaf {
+                index: ([0], [2]).into(),
+                src: path_dir.join("valid-leaf"),
+                dst: manifest_directory.join("valid-leaf"),
+            }],
+            errors: vec![
+                Error::AbsolutePathWithoutShed {
+                    index: ([0], [0]).into(),
+                },
+                Error::AbsolutePathWithoutShed {
+                    index: ([0], [1]).into(),
+                },
+            ],
         };
         assert_eq!(actual, expected);
     }

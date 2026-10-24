@@ -11,6 +11,7 @@ impl Report {
             match error {
                 traversal::Error::Expansion { index, .. }
                 | traversal::Error::NonRootPathShedBothAbsolute { index }
+                | traversal::Error::AbsolutePathWithoutShed { index }
                 | traversal::Error::DestinationOutsideRoot { index, .. } => {
                     let item = self.get_item_mut(index.as_ref());
                     item.error = Some(error_string);

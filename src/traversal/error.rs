@@ -15,6 +15,9 @@ pub enum Error {
     #[error("non-root item has both path and shed set to absolute paths")]
     NonRootPathShedBothAbsolute { index: Index },
 
+    #[error("item has an absolute path but no shed")]
+    AbsolutePathWithoutShed { index: Index },
+
     #[error("overlapping leaves detected")]
     OverlappingLeaves { indexes: HashSet<Index> },
 
