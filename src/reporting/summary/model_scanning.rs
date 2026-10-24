@@ -1,5 +1,3 @@
-use core::error;
-
 use super::model::*;
 use crate::scanning;
 
@@ -9,6 +7,8 @@ impl Report {
         nodes: impl IntoIterator<Item = scanning::Node>,
         events: impl IntoIterator<Item = scanning::Event>,
     ) {
+        assert_eq!(self.status, ReportStatus::Resolved);
+        self.status = ReportStatus::Scanning;
         self.scanning_nodes(nodes);
         for event in events {
             self.scanning_event(event);
@@ -47,7 +47,7 @@ impl Report {
                 let entry = self.get_entry_mut(index.as_ref());
                 entry.scanning_finished(error);
             }
-            scanning::Event::Done => (),
+            scanning::Event::Done => self.status = ReportStatus::Scanned,
         }
     }
 }

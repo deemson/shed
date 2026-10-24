@@ -1,6 +1,7 @@
 pub mod error;
+pub use self::error::*;
 pub mod event;
-pub use self::event::Event;
+pub use self::event::*;
 pub mod executor;
 pub use self::executor::*;
 #[cfg(test)]

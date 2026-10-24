@@ -1,5 +1,6 @@
-use shed::cli::{Cli, Command, ManifestCommand, PutGetArgs};
-use shed::{manifest, reporting, scanning, traversal};
+mod cli;
+use self::cli::{Cli, Command, ManifestCommand, PutGetArgs};
+use shed::{manifest, reporting, scanning, traversal, execution};
 use std::process::ExitCode;
 use tokio::sync::mpsc;
 
@@ -52,8 +53,6 @@ async fn run(args: &PutGetArgs, direction: traversal::Direction) {
 
     let plan = traversal::plan(direction.clone(), &manifests);
 
-    // dbg!(&plan);
-
     let (scan_sender, mut scan_receiver) = mpsc::channel(32);
     let scanner = scanning::Scanner::new(scan_sender);
     let consume_scan_events = async {
@@ -78,27 +77,26 @@ async fn run(args: &PutGetArgs, direction: traversal::Direction) {
     report.scanning(scan, scan_events);
 
     println!("{}", report.render(true));
-    // dbg!(&scan);
 
-    // let (execute_sender, mut execute_receiver) = mpsc::channel(32);
-    // let executor = execution::Executor::new(true, execute_sender);
-    //
-    // let consume_execute_events = async {
-    //     let mut events = Vec::new();
-    //
-    //     while let Some(event) = execute_receiver.recv().await {
-    //         let done = matches!(event, execution::Event::Done);
-    //         events.push(event);
-    //
-    //         if done {
-    //             break;
-    //         }
-    //     }
-    //
-    //     events
-    // };
-    //
-    // let ((), _execute_events) = tokio::join!(executor.execute(&scan), consume_execute_events);
+    let (execute_sender, mut execute_receiver) = mpsc::channel(32);
+    let executor = execution::Executor::new(true, execute_sender);
 
-    // dbg!(execute_events);
+    let consume_execute_events = async {
+        let mut events = Vec::new();
+
+        while let Some(event) = execute_receiver.recv().await {
+            let done = matches!(event, execution::Event::Done);
+            events.push(event);
+
+            if done {
+                break;
+            }
+        }
+
+        events
+    };
+
+    let ((), execute_events) = tokio::join!(executor.execute(&scan), consume_execute_events);
+
+    dbg!(execute_events);
 }

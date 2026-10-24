@@ -43,6 +43,15 @@ pub(super) fn assert_events_contain_no_replace_errors(events: &[Event]) {
 }
 
 #[track_caller]
+pub(super) fn assert_events_contain_no_entry_errors(events: &[Event]) {
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, Event::EntryFinished { error: Some(_), .. }))
+    );
+}
+
+#[track_caller]
 pub(super) fn assert_events_contain_done_last(events: &[Event]) {
     assert!(matches!(events.last(), Some(Event::Done)));
 }

@@ -16,6 +16,8 @@ pub enum ReportStatus {
     Traversed,
     Scanning,
     Scanned,
+    Executing,
+    Executed,
 }
 
 #[derive(Debug)]
@@ -53,6 +55,8 @@ pub enum ItemStatus {
     Traversed,
     Scanning,
     Scanned,
+    Executing,
+    Executed,
 }
 
 #[derive(Debug)]
@@ -68,4 +72,6 @@ pub enum EntryStatus {
     Initial,
     Scanning,
     Scanned,
+    Executing,
+    Executed,
 }

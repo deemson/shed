@@ -24,6 +24,7 @@ impl Report {
                 }
             }
         }
+        self.status = ReportStatus::Traversed;
     }
     fn traversal_nodes(&mut self, nodes: &[traversal::Node]) {
         for node in nodes {

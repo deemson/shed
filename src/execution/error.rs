@@ -1,5 +1,5 @@
 use crate::manifest::Index;
-use std::io;
+use std::{collections::HashSet, io};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -7,7 +7,7 @@ pub enum Error {
     EnsureDirectoryIo {
         #[source]
         source: io::Error,
-        child_indexes: Vec<Index>,
+        affected: HashSet<Index>,
     },
     #[error("failed to replace: {source}")]
     ReplaceIo {

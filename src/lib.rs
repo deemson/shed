@@ -1,4 +1,3 @@
-pub mod cli;
 pub mod execution;
 pub mod index;
 pub mod manifest;

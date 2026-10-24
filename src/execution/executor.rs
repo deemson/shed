@@ -4,7 +4,7 @@ use crate::{
     scanning::{self, Node},
 };
 use futures::future::join_all;
-use std::path::Path;
+use std::{collections::HashSet, path::Path};
 use tokio::sync::mpsc;
 
 pub struct Executor {
@@ -38,7 +38,7 @@ impl Executor {
                         dst: dst.to_path_buf(),
                         error: Some(Error::EnsureDirectoryIo {
                             source,
-                            child_indexes: Self::collect_node_child_indexes(node),
+                            affected: Self::collect_node_child_indexes(node),
                         }),
                     })
                     .await;
@@ -51,7 +51,7 @@ impl Executor {
                         dst: dst.to_path_buf(),
                         error: Some(Error::EnsureDirectoryIo {
                             source,
-                            child_indexes: Self::collect_node_child_indexes(node),
+                            affected: Self::collect_node_child_indexes(node),
                         }),
                     })
                     .await;
@@ -73,6 +73,7 @@ impl Executor {
                 entries,
             } => {
                 self.send_event(Event::ReplaceStarted {
+                    kind: Kind::Directory,
                     index: index.clone(),
                     src: src.to_path_buf(),
                     dst: dst.to_path_buf(),
@@ -108,8 +109,17 @@ impl Executor {
                     return;
                 }
 
-                self.execute_directory_entries(src, dst, index, entries)
-                    .await;
+                self.execute_directory_entries(
+                    src,
+                    dst,
+                    scanning::IndexRef {
+                        manifest: &index.manifest,
+                        item: &index.item,
+                        entry: &[],
+                    },
+                    entries,
+                )
+                .await;
                 self.send_event(Event::ReplaceFinished {
                     index: index.clone(),
                     src: src.to_path_buf(),
@@ -120,6 +130,7 @@ impl Executor {
             }
             Node::ReplaceFile { index, src, dst } => {
                 self.send_event(Event::ReplaceStarted {
+                    kind: Kind::File,
                     index: index.clone(),
                     src: src.to_path_buf(),
                     dst: dst.to_path_buf(),
@@ -185,14 +196,23 @@ impl Executor {
         &self,
         src_parent: &Path,
         dst_parent: &Path,
-        index: &Index,
+        index: scanning::IndexRef<'_>,
         entries: &[scanning::Entry],
     ) {
-        join_all(
-            entries
-                .iter()
-                .map(|entry| self.execute_directory_entry(src_parent, dst_parent, index, entry)),
-        )
+        join_all(entries.iter().enumerate().map(|(position, entry)| {
+            let mut entry_index = index.entry.to_vec();
+            entry_index.push(position);
+            self.execute_directory_entry(
+                src_parent,
+                dst_parent,
+                scanning::Index {
+                    manifest: index.manifest.to_vec(),
+                    item: index.item.to_vec(),
+                    entry: entry_index,
+                },
+                entry,
+            )
+        }))
         .await;
     }
 
@@ -200,7 +220,7 @@ impl Executor {
         &self,
         src_parent: &Path,
         dst_parent: &Path,
-        index: &Index,
+        index: scanning::Index,
         entry: &scanning::Entry,
     ) {
         match entry {
@@ -210,7 +230,8 @@ impl Executor {
                     .expect("scanned entry destination must be inside its parent");
                 let src = src_parent.join(relative);
 
-                self.send_event(Event::ReplaceStarted {
+                self.send_event(Event::EntryStarted {
+                    kind: Kind::Directory,
                     index: index.clone(),
                     src: src.to_path_buf(),
                     dst: dst.to_path_buf(),
@@ -218,7 +239,7 @@ impl Executor {
                 .await;
 
                 if let Err(source) = self.ensure_destination_directory(dst).await {
-                    self.send_event(Event::ReplaceFinished {
+                    self.send_event(Event::EntryFinished {
                         index: index.clone(),
                         src: src.to_path_buf(),
                         dst: dst.to_path_buf(),
@@ -227,9 +248,9 @@ impl Executor {
                     .await;
                     return;
                 }
-                self.execute_directory_entries(&src, dst, index, entries)
+                self.execute_directory_entries(&src, dst, index.as_ref(), entries)
                     .await;
-                self.send_event(Event::ReplaceFinished {
+                self.send_event(Event::EntryFinished {
                     index: index.clone(),
                     src: src.to_path_buf(),
                     dst: dst.to_path_buf(),
@@ -238,7 +259,8 @@ impl Executor {
                 .await;
             }
             scanning::Entry::File { src, dst } => {
-                self.send_event(Event::ReplaceStarted {
+                self.send_event(Event::EntryStarted {
+                    kind: Kind::File,
                     index: index.clone(),
                     src: src.to_path_buf(),
                     dst: dst.to_path_buf(),
@@ -246,7 +268,7 @@ impl Executor {
                 .await;
 
                 if let Err(source) = self.ensure_file(src, dst).await {
-                    self.send_event(Event::ReplaceFinished {
+                    self.send_event(Event::EntryFinished {
                         index: index.clone(),
                         src: src.to_path_buf(),
                         dst: dst.to_path_buf(),
@@ -257,7 +279,7 @@ impl Executor {
                     return;
                 }
 
-                self.send_event(Event::ReplaceFinished {
+                self.send_event(Event::EntryFinished {
                     index: index.clone(),
                     src: src.to_path_buf(),
                     dst: dst.to_path_buf(),
@@ -364,26 +386,26 @@ impl Executor {
         Ok(())
     }
 
-    fn collect_node_child_indexes(node: &scanning::Node) -> Vec<Index> {
-        let mut indexes = Vec::new();
+    fn collect_node_child_indexes(node: &scanning::Node) -> HashSet<Index> {
+        let mut indexes = HashSet::new();
         Self::subcollect_node_child_indexes(&mut indexes, node);
         indexes
     }
 
-    fn subcollect_nodes_child_indexes(indexes: &mut Vec<Index>, nodes: &[scanning::Node]) {
+    fn subcollect_nodes_child_indexes(indexes: &mut HashSet<Index>, nodes: &[scanning::Node]) {
         for node in nodes.iter() {
             Self::subcollect_node_child_indexes(indexes, node);
         }
     }
 
-    fn subcollect_node_child_indexes(indexes: &mut Vec<Index>, node: &scanning::Node) {
+    fn subcollect_node_child_indexes(indexes: &mut HashSet<Index>, node: &scanning::Node) {
         match node {
             scanning::Node::EnsureDirectory { nodes, .. } => {
                 Self::subcollect_nodes_child_indexes(indexes, nodes);
             }
             scanning::Node::ReplaceFile { index, .. }
             | scanning::Node::ReplaceDirectory { index, .. } => {
-                indexes.push(index.clone());
+                indexes.insert(index.clone());
             }
         }
     }
@@ -498,6 +520,7 @@ mod tests {
 
         testing_e::assert_events_contain_no_ensure_errors(&execution_events);
         testing_e::assert_events_contain_no_replace_errors(&execution_events);
+        testing_e::assert_events_contain_no_entry_errors(&execution_events);
         testing_e::assert_events_contain_done_last(&execution_events);
 
         for path in paths {

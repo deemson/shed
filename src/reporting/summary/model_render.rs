@@ -4,7 +4,6 @@ use colored::Colorize;
 
 struct Context {
     direction: Option<traversal::Direction>,
-    status: ReportStatus,
     verbose: bool,
 }
 
@@ -12,7 +11,6 @@ impl Report {
     pub fn render(self, verbose: bool) -> String {
         let context = Context {
             direction: self.direction,
-            status: self.status,
             verbose,
         };
         self.manifests
