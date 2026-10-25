@@ -1,6 +1,6 @@
 [package]
 name = "shed"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "Sync dotfiles between system paths and a local shed"
 license = "MIT"
@@ -20,8 +20,14 @@ tokio-util = "0.7"
 futures = "0.3"
 async-walkdir = "2"
 yaml_serde = "0.10"
+iradix = "0.3.0"
+shellexpand = { version = "3", default-features = false, features = ["base-0", "path", "tilde"] }
+path-clean = "1.0.1"
+colored = "3.1.1"
 
 [dev-dependencies]
+indoc = "2.0.7"
+pretty_assertions = "1.4.1"
 tempfile = "3"
 
 [profile.release]
