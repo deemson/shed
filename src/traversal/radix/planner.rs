@@ -174,10 +174,10 @@ impl Planner {
             return;
         }
 
-        let path = path_parent.join(item_path).clean();
+        let path = path_parent.join(&item_path).clean();
         let shed = match item_shed {
             Some(shed) => shed_parent.join(shed),
-            None => shed_parent.join(&item.path),
+            None => shed_parent.join(&item_path),
         }
         .clean();
 
@@ -378,5 +378,63 @@ mod tests {
 
         assert_eq!(errors, vec![]);
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn expands_the_item_path_on_the_shed_side_without_a_shed() {
+        let manifest = Manifest {
+            name: "manifest".into(),
+            location: "/shed/manifest.yaml".into(),
+            path: Some("/config".into()),
+            shed: None,
+            manifests: Vec::new(),
+            items: vec![
+                ItemKind::Path("prefix-${HOME}".into()),
+                ItemKind::Path("plain".into()),
+            ],
+        };
+        let home = std::env::var("HOME").unwrap();
+        let expanded = PathBuf::from(format!("prefix-{home}"));
+
+        for direction in [Direction::Put, Direction::Get] {
+            let (_, dst_root) = direction.resolve("/config".into(), "/shed".into());
+            let (expanded_src, expanded_dst) = direction.resolve(
+                Path::new("/config").join(&expanded),
+                Path::new("/shed").join(&expanded),
+            );
+            let (plain_src, plain_dst) =
+                direction.resolve("/config/plain".into(), "/shed/plain".into());
+            let mut expected = vec![
+                (
+                    expanded_dst,
+                    vec![Entry {
+                        dst_root: Some(dst_root.clone()),
+                        index: ([0], [0]).into(),
+                        src: expanded_src,
+                    }],
+                ),
+                (
+                    plain_dst,
+                    vec![Entry {
+                        dst_root: Some(dst_root),
+                        index: ([0], [1]).into(),
+                        src: plain_src,
+                    }],
+                ),
+            ];
+            expected.sort_by(|left, right| left.0.cmp(&right.0));
+
+            let Plan { radix, errors } =
+                Planner::new(direction).plan(std::slice::from_ref(&manifest));
+            let actual = radix
+                .range::<Path, _>(..)
+                .map(|(components, entries)| {
+                    (components.into_iter().collect::<PathBuf>(), entries.clone())
+                })
+                .collect::<Vec<_>>();
+
+            assert_eq!(errors, vec![]);
+            assert_eq!(actual, expected);
+        }
     }
 }
