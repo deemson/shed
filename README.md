@@ -24,10 +24,10 @@ Homebrew is the supported binary installation route on macOS. The raw macOS arch
 Official tags expose a flake package for x86_64 and aarch64 Linux. Release outputs are served by the public `deemson-shed` Cachix cache, with a local source build as the automatic fallback:
 
 ```sh
-nix profile install github:deemson/shed/v0.3.0 --accept-flake-config
+nix profile install github:deemson/shed/v0.4.0 --accept-flake-config
 ```
 
-`--accept-flake-config` explicitly accepts the public cache URL and signing key declared by the flake. Replace `v0.3.0` with the release you want; pinning the tag keeps installations reproducible.
+`--accept-flake-config` explicitly accepts the public cache URL and signing key declared by the flake. Replace `v0.4.0` with the release you want; pinning the tag keeps installations reproducible.
 
 Static musl archives that run directly on NixOS are also available from each [GitHub release](https://github.com/deemson/shed/releases):
 
@@ -41,7 +41,7 @@ Verify the adjacent `.sha256` file before extracting an archive and placing `she
 Building from source requires Rust 1.97.1 and Cargo:
 
 ```sh
-cargo install --git https://github.com/deemson/shed.git --tag v0.3.0 --locked
+cargo install --git https://github.com/deemson/shed.git --tag v0.4.0 --locked
 ```
 
 To install from a local checkout instead:
@@ -217,7 +217,7 @@ A run has four phases:
 
 Shed stops before the copy phase only when an error hides where an item writes. These errors come from resolve and plan: an absent include, an unreadable manifest, invalid YAML, an unset environment variable in `path` or `shed`, and a broken path rule. For any other error, Shed skips the affected items and copies the rest. An include cycle skips only the repeated include, and an overlap skips every item in the overlap. An error in the copy phase does not stop the copies of other items. At the end, Shed prints the report and exits with code `1` if any phase reported an error.
 
-At the end of a run, Shed prints a report as a tree of manifests and items. An arrow shows the direction: `←` for `put` and `→` for `get`. Each error appears in red below its item. A `--dry` run prints the same report as a real run.
+At the end of a run, Shed prints a report as a tree of manifests and items. An arrow shows the direction: `←` for `put` and `→` for `get`. Each error appears in red below its manifest or item. A `--dry` run prints the same report as a real run.
 
 Copy rules:
 
@@ -229,6 +229,11 @@ Copy rules:
 - A symlink in a source is an error, at the top level and inside a directory.
 
 Shed does not handle Ctrl-C. An interrupt stops the process immediately and can leave a copy incomplete.
+
+## Migrating from 0.3
+
+- Shed no longer stops after the first phase that reports an error. Shed stops before the copy phase only when an error hides where an item writes. For any other error, Shed skips the affected items and copies the rest. The exit code is still `1`.
+- An item without `shed` now uses its expanded `path` as its shed path. Version 0.3 used the unexpanded text, so `put` wrote to a directory with a literal variable name, such as `$APP_DIR`. Rename such directories in your shed repository before you run `get`.
 
 ## Migrating from 0.2
 
