@@ -215,7 +215,7 @@ A run has four phases:
 3. **Scan** reads the metadata of each source and lists the contents of each source directory.
 4. **Copy** creates the destination directories and copies the files.
 
-Shed stops after the first phase that reports an error. Shed then prints the report and exits with code `1`. So Shed changes no files unless resolve, plan, and scan all succeed. An error in the copy phase does not stop the copies of other items.
+Shed stops before the copy phase only when an error hides where an item writes. These errors come from resolve and plan: an absent include, an unreadable manifest, invalid YAML, an unset environment variable in `path` or `shed`, and a broken path rule. For any other error, Shed skips the affected items and copies the rest. An include cycle skips only the repeated include, and an overlap skips every item in the overlap. An error in the copy phase does not stop the copies of other items. At the end, Shed prints the report and exits with code `1` if any phase reported an error.
 
 At the end of a run, Shed prints a report as a tree of manifests and items. An arrow shows the direction: `←` for `put` and `→` for `get`. Each error appears in red below its item. A `--dry` run prints the same report as a real run.
 
@@ -223,6 +223,7 @@ Copy rules:
 
 - For a file source, Shed replaces the destination file. A destination that exists and is not a regular file is an error.
 - For a directory source, Shed deletes the destination directory and copies the source tree into a new one.
+- If an entry inside a directory source fails to scan, Shed skips the whole item and leaves the destination directory untouched.
 - Shed creates the parent directories of each destination.
 - A source that does not exist is an error.
 - A symlink in a source is an error, at the top level and inside a directory.
@@ -242,7 +243,7 @@ The manifest format and the copy rules changed after 0.2.
 - A manifest that two manifests include now causes an overlap error. Version 0.2 processed it once.
 - An empty `items` list is no longer an error.
 - A directory copy now deletes files that exist only at the destination. Version 0.2 left them in place.
-- A source that does not exist is now an error that stops the run. Version 0.2 skipped it with a warning.
+- A source that does not exist is now an error. Shed skips the item, copies the other items, and exits with code `1`. Version 0.2 skipped it with a warning.
 - A symlink in a source is now an error. Version 0.2 copied the content of a file symlink.
 - `--no-progress` and the progress display are gone. Shed prints one report at the end of the run. `-v` now adds directory contents to the report.
 - Every error exits with code `1`. Codes `2` and `130` are gone.

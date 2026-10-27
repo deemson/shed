@@ -9,7 +9,13 @@ A run has four phases. Each phase is a module in `src/` and takes plain data fro
 3. `scanning` reads the source metadata and turns the plan into `scanning::Node` values.
 4. `execution` creates directories and copies files.
 
-`manifest`, `scanning`, and `execution` send events to an `mpsc` channel. `main.rs` collects the events of each phase and checks them for errors. If a phase reports an error, `main.rs` stops the run, prints the report, and exits with code 1.
+`manifest`, `scanning`, and `execution` send events to an `mpsc` channel. `main.rs` collects the events of each phase and gives them to `orchestration`, which sorts the errors of the phase into a `PhaseOutcome`:
+
+- `BlockingErrors`: an error hides where an item writes, so the overlap check is incomplete. `main.rs` stops the run, prints the report, and exits with code 1.
+- `NonBlockingErrors`: every error affects only its own items. The phases leave those items out of their output, and the run continues.
+- `NoErrors`: the phase reported no error.
+
+Each `orchestration` function matches every error variant without a `_` arm, so a new variant needs a decision at compile time. After execution, `main.rs` exits with code 1 if any phase reported an error.
 
 `reporting::summary` builds the report from the manifests, the plan, and the events. The report takes ownership of the manifests and of the events, and it does not decide whether a run failed.
 
