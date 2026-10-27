@@ -40,3 +40,9 @@ Examples:
 - `fix: handle missing source paths gracefully`
 - `docs: update README with usage examples`
 - `refactor(sync): extract directory traversal logic`
+
+## Claims About the Compiler
+
+Do not state that the compiler rejects or needs some code before you build it. Remove the code in question, run `cargo build`, and quote the result.
+
+The most frequent false claim concerns `move` on a closure or an async block. Without `move`, a closure or an async block captures each variable in the weakest mode that its body needs. A body that passes a variable by value captures that variable by value. So `move` changes only the variables that the body uses by reference.
