@@ -1,6 +1,6 @@
 mod cli;
 use self::cli::{Cli, Command, ManifestCommand, PutGetArgs};
-use shed::{execution, manifest, reporting, scanning, traversal};
+use shed::{execution, manifest, orchestration, reporting, scanning, traversal};
 use std::process::ExitCode;
 use tokio::sync::mpsc;
 
@@ -41,19 +41,22 @@ async fn run(args: &PutGetArgs, direction: traversal::Direction) -> ExitCode {
         }),
     );
 
-    if resolution_failed(&resolve_events) {
+    let resolution_outcome = orchestration::resolution::outcome(&resolve_events);
+
+    if resolution_outcome == orchestration::PhaseOutcome::BlockingErrors {
         let mut report = reporting::summary::Report::new(manifests);
         report.resolution(resolve_events);
         return bail(report, args.verbose);
     }
 
     let plan = traversal::plan(direction.clone(), &manifests);
+    let traversal_outcome = orchestration::traversal::outcome(&plan.errors);
 
     let mut report = reporting::summary::Report::new(manifests);
     report.resolution(resolve_events);
     report.traversal(direction, &plan);
 
-    if !plan.errors.is_empty() {
+    if traversal_outcome == orchestration::PhaseOutcome::BlockingErrors {
         return bail(report, args.verbose);
     }
 
@@ -66,10 +69,10 @@ async fn run(args: &PutGetArgs, direction: traversal::Direction) -> ExitCode {
         }),
     );
 
-    let scan_failed = scanning_failed(&scan_events);
+    let scanning_outcome = orchestration::scanning::outcome(&scan_events);
     report.scanning(&scan, scan_events);
 
-    if scan_failed {
+    if scanning_outcome == orchestration::PhaseOutcome::BlockingErrors {
         return bail(report, args.verbose);
     }
 
@@ -82,10 +85,14 @@ async fn run(args: &PutGetArgs, direction: traversal::Direction) -> ExitCode {
         }),
     );
 
-    let execute_failed = execution_failed(&execute_events);
+    let execution_has_errors = orchestration::execution::has_errors(&execute_events);
     report.execution(execute_events);
 
-    if execute_failed {
+    let outcome = resolution_outcome
+        .max(traversal_outcome)
+        .max(scanning_outcome);
+
+    if outcome != orchestration::PhaseOutcome::NoErrors || execution_has_errors {
         return bail(report, args.verbose);
     }
 
@@ -107,36 +114,6 @@ async fn collect_events<E>(
         }
     }
     events
-}
-
-fn resolution_failed(events: &[manifest::Event]) -> bool {
-    events.iter().any(|event| {
-        matches!(
-            event,
-            manifest::Event::ResolutionFinished { error: Some(_), .. }
-        )
-    })
-}
-
-fn scanning_failed(events: &[scanning::Event]) -> bool {
-    events.iter().any(|event| {
-        matches!(
-            event,
-            scanning::Event::NodeScanningFinished { error: Some(_), .. }
-                | scanning::Event::EntryScanningFinished { error: Some(_), .. }
-        )
-    })
-}
-
-fn execution_failed(events: &[execution::Event]) -> bool {
-    events.iter().any(|event| {
-        matches!(
-            event,
-            execution::Event::EnsureFinished { error: Some(_), .. }
-                | execution::Event::ReplaceFinished { error: Some(_), .. }
-                | execution::Event::EntryFinished { error: Some(_), .. }
-        )
-    })
 }
 
 fn bail(report: reporting::summary::Report, verbose: bool) -> ExitCode {

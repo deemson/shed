@@ -33,4 +33,12 @@ impl Entry {
             Self::Directory { dst, .. } | Self::File { dst, .. } | Self::Unknown { dst, .. } => dst,
         }
     }
+
+    pub fn contains_unknown(&self) -> bool {
+        match self {
+            Self::Directory { entries, .. } => entries.iter().any(Self::contains_unknown),
+            Self::File { .. } => false,
+            Self::Unknown { .. } => true,
+        }
+    }
 }

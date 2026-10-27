@@ -72,6 +72,10 @@ impl Executor {
                 dst,
                 entries,
             } => {
+                if entries.iter().any(scanning::Entry::contains_unknown) {
+                    return;
+                }
+
                 self.send_event(Event::ReplaceStarted {
                     kind: Kind::Directory,
                     index: index.clone(),
@@ -287,7 +291,9 @@ impl Executor {
                 })
                 .await;
             }
-            scanning::Entry::Unknown { .. } => {}
+            scanning::Entry::Unknown { .. } => {
+                unreachable!("a directory with an unknown entry is skipped before its entries")
+            }
         }
     }
 
@@ -418,8 +424,12 @@ impl Executor {
 
 #[cfg(test)]
 mod tests {
-    use super::super::testing as testing_e;
-    use crate::{manifest::testing as testing_m, scanning::testing as testing_s, traversal};
+    use super::super::{event::Event, testing as testing_e};
+    use crate::{
+        manifest::testing as testing_m,
+        scanning::{self, testing as testing_s},
+        traversal,
+    };
     use tempfile::TempDir;
 
     #[tokio::test]
@@ -525,6 +535,95 @@ mod tests {
         testing_e::assert_events_contain_done_last(&execution_events);
 
         for path in paths {
+            assert!(dst_dir.join(path).is_file());
+        }
+    }
+
+    #[tokio::test]
+    async fn skips_a_directory_with_an_unknown_entry() {
+        let temp_dir = TempDir::new().unwrap();
+        let src_dir = temp_dir.path().join("src");
+        let dst_dir = temp_dir.path().join("dst");
+
+        let src_paths = ["dir/a"];
+        let dst_paths = ["dir/a", "dir/b"];
+
+        for path in src_paths {
+            testing_m::write(&src_dir.join(path), path);
+        }
+        for path in dst_paths {
+            testing_m::write(&dst_dir.join(path), path);
+        }
+
+        let events = testing_e::execute(
+            false,
+            &[scanning::Node::ReplaceDirectory {
+                index: ([0], [0]).into(),
+                src: src_dir.join("dir"),
+                dst: dst_dir.join("dir"),
+                entries: vec![
+                    scanning::Entry::File {
+                        src: src_dir.join("dir/a"),
+                        dst: dst_dir.join("dir/a"),
+                    },
+                    scanning::Entry::Unknown {
+                        src: src_dir.join("dir/b"),
+                        dst: dst_dir.join("dir/b"),
+                    },
+                ],
+            }],
+        )
+        .await;
+
+        assert!(matches!(events.as_slice(), [Event::Done]));
+
+        for path in dst_paths {
+            assert!(dst_dir.join(path).is_file());
+        }
+    }
+
+    #[tokio::test]
+    async fn skips_a_directory_with_a_nested_unknown_entry() {
+        let temp_dir = TempDir::new().unwrap();
+        let src_dir = temp_dir.path().join("src");
+        let dst_dir = temp_dir.path().join("dst");
+
+        let src_paths = ["dir/a"];
+        let dst_paths = ["dir/a", "dir/sub/b"];
+
+        for path in src_paths {
+            testing_m::write(&src_dir.join(path), path);
+        }
+        for path in dst_paths {
+            testing_m::write(&dst_dir.join(path), path);
+        }
+
+        let events = testing_e::execute(
+            false,
+            &[scanning::Node::ReplaceDirectory {
+                index: ([0], [0]).into(),
+                src: src_dir.join("dir"),
+                dst: dst_dir.join("dir"),
+                entries: vec![
+                    scanning::Entry::File {
+                        src: src_dir.join("dir/a"),
+                        dst: dst_dir.join("dir/a"),
+                    },
+                    scanning::Entry::Directory {
+                        dst: dst_dir.join("dir/sub"),
+                        entries: vec![scanning::Entry::Unknown {
+                            src: src_dir.join("dir/sub/b"),
+                            dst: dst_dir.join("dir/sub/b"),
+                        }],
+                    },
+                ],
+            }],
+        )
+        .await;
+
+        assert!(matches!(events.as_slice(), [Event::Done]));
+
+        for path in dst_paths {
             assert!(dst_dir.join(path).is_file());
         }
     }
