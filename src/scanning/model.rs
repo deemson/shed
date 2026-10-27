@@ -24,12 +24,13 @@ pub enum Node {
 pub enum Entry {
     Directory { dst: PathBuf, entries: Vec<Entry> },
     File { src: PathBuf, dst: PathBuf },
+    Unknown { src: PathBuf, dst: PathBuf },
 }
 
 impl Entry {
     pub fn dst(&self) -> &Path {
         match self {
-            Self::Directory { dst, .. } | Self::File { dst, .. } => dst,
+            Self::Directory { dst, .. } | Self::File { dst, .. } | Self::Unknown { dst, .. } => dst,
         }
     }
 }

@@ -287,6 +287,7 @@ impl Executor {
                 })
                 .await;
             }
+            scanning::Entry::Unknown { .. } => {}
         }
     }
 
