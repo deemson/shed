@@ -9,6 +9,10 @@ impl Report {
         for error in &plan.errors {
             let error_string = error.to_string();
             match error {
+                traversal::Error::Expansion { index, .. } if index.item.is_empty() => {
+                    let manifest = self.get_manifest_mut(&index.manifest);
+                    manifest.error = Some(error_string);
+                }
                 traversal::Error::Expansion { index, .. }
                 | traversal::Error::NonRootPathShedBothAbsolute { index }
                 | traversal::Error::AbsolutePathWithoutShed { index }

@@ -211,3 +211,16 @@ fn reports_an_absent_include_and_copies_nothing() {
     assert!(!fixture.repo.join("good").exists());
     assert!(report.contains("manifest was not found"));
 }
+
+#[test]
+fn reports_a_manifest_expansion_error_and_copies_nothing() {
+    let fixture = Fixture::new();
+    write(&fixture.home.join("good/a"), "good");
+    let manifest = fixture.manifest("shed", "path: $SHED_TEST_UNSET\nitems:\n  - good\n");
+
+    let (status, report) = put(&manifest);
+
+    assert_eq!(status.code(), Some(1));
+    assert!(!fixture.repo.join("good").exists());
+    assert!(report.contains("failed to expand path"));
+}
