@@ -157,10 +157,10 @@ impl Scanner {
         }))
         .await;
 
-        Ok(entries.into_iter().flatten().collect())
+        Ok(entries)
     }
 
-    pub async fn scan_entry(&self, index: Index, src: &Path, dst: &Path) -> Option<Entry> {
+    pub async fn scan_entry(&self, index: Index, src: &Path, dst: &Path) -> Entry {
         self.send_event(Event::EntryScanningStarted {
             index: index.to_owned(),
         })
@@ -176,7 +176,10 @@ impl Scanner {
                     }),
                 })
                 .await;
-                return None;
+                return Entry::Unknown {
+                    src: src.to_path_buf(),
+                    dst: dst.to_path_buf(),
+                };
             }
         };
         if metadata.is_dir() {
@@ -188,13 +191,16 @@ impl Scanner {
                         error: Some(error),
                     })
                     .await;
-                    return None;
+                    return Entry::Unknown {
+                        src: src.to_path_buf(),
+                        dst: dst.to_path_buf(),
+                    };
                 }
             };
-            let entry = Some(Entry::Directory {
+            let entry = Entry::Directory {
                 dst: dst.to_path_buf(),
                 entries,
-            });
+            };
             self.send_event(Event::EntryScanningFinished {
                 index: index.to_owned(),
                 error: None,
@@ -203,10 +209,10 @@ impl Scanner {
             return entry;
         }
         if metadata.is_file() {
-            let entry = Some(Entry::File {
+            let entry = Entry::File {
                 src: src.to_path_buf(),
                 dst: dst.to_path_buf(),
-            });
+            };
             self.send_event(Event::EntryScanningFinished {
                 index: index.to_owned(),
                 error: None,
@@ -221,7 +227,10 @@ impl Scanner {
             }),
         })
         .await;
-        None
+        Entry::Unknown {
+            src: src.to_path_buf(),
+            dst: dst.to_path_buf(),
+        }
     }
 
     async fn send_event(&self, event: Event) {
@@ -235,6 +244,7 @@ mod tests {
     use crate::manifest::testing as testing_m;
 
     use super::{super::testing as testing_s, *};
+    use std::{fs, os::unix::fs::PermissionsExt};
     use tempfile::TempDir;
 
     #[tokio::test]
@@ -469,6 +479,59 @@ mod tests {
                 dst: dst_dir.join("file2"),
             },
         ];
+
+        assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
+    async fn scans_a_directory_item_with_an_unreadable_second_entry() {
+        let temp_dir = TempDir::new().unwrap();
+        let src_dir = temp_dir.path().join("src");
+        let dst_dir = temp_dir.path().join("dst");
+
+        for path in ["dir/a", "dir/b/file", "dir/c"] {
+            testing_m::write(&src_dir.join(path), path);
+        }
+        let unreadable = src_dir.join("dir/b");
+        fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o000)).unwrap();
+
+        let (actual, events) = testing_s::scan([traversal::Node::Leaf {
+            index: ([0], [0]).into(),
+            src: src_dir.join("dir"),
+            dst: dst_dir.join("dir"),
+        }])
+        .await;
+
+        fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o755)).unwrap();
+
+        testing_s::assert_events_contain_done_last(&events);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Event::EntryScanningFinished {
+                index,
+                error: Some(Error::ReadDirIo { .. }),
+            } if index.entry == [1]
+        )));
+
+        let expected = vec![Node::ReplaceDirectory {
+            index: ([0], [0]).into(),
+            src: src_dir.join("dir"),
+            dst: dst_dir.join("dir"),
+            entries: vec![
+                Entry::File {
+                    src: src_dir.join("dir/a"),
+                    dst: dst_dir.join("dir/a"),
+                },
+                Entry::Unknown {
+                    src: src_dir.join("dir/b"),
+                    dst: dst_dir.join("dir/b"),
+                },
+                Entry::File {
+                    src: src_dir.join("dir/c"),
+                    dst: dst_dir.join("dir/c"),
+                },
+            ],
+        }];
 
         assert_eq!(actual, expected);
     }

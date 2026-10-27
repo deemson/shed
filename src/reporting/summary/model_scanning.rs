@@ -1,5 +1,5 @@
 use super::model::*;
-use crate::scanning;
+use crate::{manifest, scanning};
 
 impl Report {
     pub fn scanning(
@@ -44,6 +44,14 @@ impl Report {
                 entry.scanning_started();
             }
             scanning::Event::EntryScanningFinished { index, error } => {
+                if error.is_some() {
+                    let item = self.get_item_mut(manifest::IndexRef {
+                        manifest: &index.manifest,
+                        item: &index.item,
+                    });
+                    item.error
+                        .get_or_insert_with(|| "failed to scan some entries".to_string());
+                }
                 let entry = self.get_entry_mut(index.as_ref());
                 entry.scanning_finished(error);
             }
@@ -59,7 +67,9 @@ impl Item {
     }
     fn scanning_finished(&mut self, error: Option<scanning::Error>) {
         assert_eq!(self.status, ItemStatus::Scanning);
-        self.error = error.map(|error| error.to_string());
+        if let Some(error) = error {
+            self.error = Some(error.to_string());
+        }
         self.status = ItemStatus::Scanned;
     }
 }
