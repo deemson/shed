@@ -34,23 +34,24 @@ impl Resolver {
     }
 
     pub async fn resolve(&self, inputs: impl IntoIterator<Item = Input>) -> Vec<Manifest> {
-        let manifests = self
-            .resolve_manifest_files(Vec::new(), Vec::new(), inputs)
-            .await;
+        let manifests = self.resolve_manifest_files(inputs).await;
         self.send_event(Event::Done).await;
         manifests
     }
 
     async fn resolve_manifest_files(
         &self,
-        input_stack: Vec<Input>,
-        index: Index,
         inputs: impl IntoIterator<Item = Input>,
     ) -> Vec<Manifest> {
         join_all(inputs.into_iter().enumerate().map(|(position, input)| {
-            let mut child_index = index.clone();
-            child_index.push(position);
-            self.resolve_manifest_file(input_stack.clone(), child_index, input)
+            let index = vec![position];
+            async {
+                self.send_event(Event::ResolutionStarted {
+                    index: index.clone(),
+                })
+                .await;
+                self.resolve_manifest_file(Vec::new(), index, input).await
+            }
         }))
         .await
     }
@@ -61,11 +62,6 @@ impl Resolver {
         index: Index,
         input: Input,
     ) -> Manifest {
-        self.send_event(Event::ResolutionStarted {
-            index: index.clone(),
-        })
-        .await;
-
         if let Some(position) = input_stack
             .iter()
             .position(|active_input| active_input.path == input.path)
@@ -135,6 +131,11 @@ impl Resolver {
         path: &Path,
         name: &str,
     ) -> Manifest {
+        self.send_event(Event::ResolutionStarted {
+            index: index.clone(),
+        })
+        .await;
+
         let directory = path
             .parent()
             .expect("a canonical manifest path has a parent")
@@ -405,5 +406,47 @@ mod tests {
         assert_events_contain_done_last(&events);
 
         assert_eq!(actual, expected)
+    }
+
+    #[tokio::test]
+    async fn starts_the_resolution_of_an_absent_include_before_it_finishes() {
+        let temp_dir = TempDir::new().unwrap();
+
+        let root_path = write_yaml_manifest(
+            temp_dir.path(),
+            "root",
+            indoc! {"
+              include:
+                - absent
+            "},
+        );
+
+        let (_, events) = resolve(vec![Input {
+            name: String::from("root"),
+            path: root_path,
+        }])
+        .await;
+
+        let include_events = events
+            .iter()
+            .filter(|event| match event {
+                Event::ResolutionStarted { index } | Event::ResolutionFinished { index, .. } => {
+                    index.as_slice() == [0, 0]
+                }
+                Event::Done => false,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(matches!(
+            include_events.as_slice(),
+            [
+                Event::ResolutionStarted { .. },
+                Event::ResolutionFinished {
+                    error: Some(Error::NotFound),
+                    ..
+                },
+            ]
+        ));
+        assert_events_contain_done_last(&events);
     }
 }

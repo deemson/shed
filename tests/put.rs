@@ -188,3 +188,26 @@ fn copies_nothing_when_a_destination_is_unknown() {
     assert!(!fixture.repo.join("good").exists());
     assert!(report.contains("failed to expand shed"));
 }
+
+#[test]
+fn reports_an_absent_include_and_copies_nothing() {
+    let fixture = Fixture::new();
+    write(&fixture.home.join("good/a"), "good");
+    let home = fixture.home.display();
+    let manifest = fixture.manifest(
+        "root",
+        &formatdoc! {"
+          include:
+            - absent
+          path: {home}
+          items:
+            - good
+        "},
+    );
+
+    let (status, report) = put(&manifest);
+
+    assert_eq!(status.code(), Some(1));
+    assert!(!fixture.repo.join("good").exists());
+    assert!(report.contains("manifest was not found"));
+}
